@@ -1,0 +1,22 @@
+{
+  "name": "rubric-survey-frontend",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev -p 3000",
+    "build": "next build",
+    "start": "next start -p 3000",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "next": "13.5.11",
+    "react": "18.2.0",
+    "react-dom": "18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "16.18.126",
+    "@types/react": "18.2.79",
+    "@types/react-dom": "18.2.25",
+    "typescript": "5.3.3"
+  }
+}
