@@ -71,6 +71,7 @@ const DICT = {
     references: 'References',
     caseBadge: 'Case',
     notFound: 'Not found',
+    selectPlaceholder: 'Select…',
     yes: 'Yes',
     no: 'No',
     required: 'required',
@@ -193,6 +194,7 @@ const DICT = {
     caseBadge: '案例',
     notFound: '找不到',
     // admin
+    selectPlaceholder: '請選擇…',
     yes: '是',
     no: '否',
     required: '必填',

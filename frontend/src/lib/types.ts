@@ -16,7 +16,7 @@ export interface QuestionOption {
   anchor?: Bilingual;
 }
 
-export type QuestionType = 'anchor' | 'singleChoice' | 'text' | 'number' | 'yesno';
+export type QuestionType = 'anchor' | 'singleChoice' | 'checkboxes' | 'dropdown' | 'text' | 'number' | 'yesno';
 
 export interface ResolvedQuestion {
   key: string;
@@ -47,8 +47,14 @@ export interface SiteConfig {
   defaultLang: 'en' | 'zh';
   allowLangToggle: boolean;
   showNotes: boolean;
-  instruction: Bilingual;
-  references: string[];
+  instruction?: Bilingual;
+  references?: string[];
+}
+
+export interface QuestionGroup {
+  instruction?: Bilingual;
+  references?: string[];
+  keys: string[];
 }
 
 export interface ResolvedCase {
@@ -60,6 +66,7 @@ export interface ResolvedCase {
   content: ContentBlock[];
   questions: ResolvedQuestion[];
   requiredCount: number;
+  questionGroups: QuestionGroup[];
   myStatus?: string;
   myUpdatedAt?: string | null;
   mySubmittedAt?: string | null;

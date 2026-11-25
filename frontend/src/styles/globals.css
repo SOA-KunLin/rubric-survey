@@ -269,6 +269,49 @@ button.btn:disabled {
   margin-right: 6px;
 }
 
+/* number field */
+.numfield {
+  display: inline-flex;
+  align-items: stretch;
+  border: 1.5px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  overflow: hidden;
+  max-width: 280px;
+}
+.numfield:focus-within {
+  border-color: var(--brand);
+  outline: 2px solid var(--brand-soft);
+}
+.numfield input {
+  border: none;
+  outline: none;
+  width: 110px;
+  padding: 10px 12px;
+  font: inherit;
+  font-weight: 600;
+  text-align: center;
+  background: transparent;
+  color: var(--ink);
+  margin-top: 0;
+}
+.numfield input::-webkit-outer-spin-button,
+.numfield input::-webkit-inner-spin-button {
+  opacity: 1;
+}
+.numfield .unit {
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 0.8rem;
+  background: #f6f8fc;
+  white-space: nowrap;
+}
+html[data-theme='dark'] .numfield .unit {
+  background: #232f4a;
+}
+
 /* misc */
 .row {
   display: flex;

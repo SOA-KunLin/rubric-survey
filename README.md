@@ -8,7 +8,7 @@
 
 1. **全域網站設定 `site`**:`theme`(內建 `light` / `dark` / `ocean` / `forest` / `high-contrast`,或以 `themeColors` 直接指定 CSS 變數)、標題/副標題、`defaultLang`、`allowLangToggle`、`showNotes`、作答說明與參考文獻。
 2. **案例數設定 `cases`**:陣列裡有幾個案例,評分者就看到幾個;每個案例可 `active: false` 暫時隱藏。
-3. **案例內問卷設定 `questions` / `content`**:每個案例各自定義題目陣列與內容區塊;題型支援 `anchor`(錨點量表)、`singleChoice`、`number`(min/max)、`text`、`yesno`;`required` 控制必填;`appliesIf: {"hasResponseB": true}` 條件顯示(如「一致性」僅在案例有回應 B 時出現)。
+3. **案例內問卷設定 `questions` / `content`**:每個案例各自定義題目陣列與內容區塊;題型支援 `anchor`(錨點量表)、`singleChoice`、`number`(min/max)、`text`、`yesno`;`required` 控制必填;`appliesIf: {"hasResponseB": true}` 條件顯示(如「一致性」僅在案例有回應 B 時出現)。`questions` 也可以寫成物件 `{ "items": [...], "instruction": {...}, "references": [...] }`,讓**每個題組帶自己的作答說明與參考文獻**(兩三個 rubrics 共享一組);未指定時退回 `site.instruction` / `site.references`。
 
 **巢狀模板**:`templates` 下可放共用定義;任何節點用 `"$use": "模板名"`(或 `"$ref": "#/templates/x"`)引入後**深層合併**,inline 欄位覆蓋模板值;空物件(純引用)保留模板值。量表錨點(`rubric.json` 的 10 個面向)自動註冊為 `rubric:<key>` 模板,例如 `{"$use": "rubric:accuracy"}`。後台「問卷設定」頁可直接編輯 JSON、驗證並套用(熱生效,免重啟),亦可下載目前設定。
 

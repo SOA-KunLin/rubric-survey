@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { RubricService } from '../rubric/rubric.service';
 
-export type QuestionType = 'anchor' | 'singleChoice' | 'text' | 'number' | 'yesno';
+export type QuestionType = 'anchor' | 'singleChoice' | 'checkboxes' | 'dropdown' | 'text' | 'number' | 'yesno';
 
 export interface QuestionOption {
   value: number | string;
@@ -33,6 +33,12 @@ export interface ContentBlock {
   collapsible?: boolean;
 }
 
+export interface QuestionGroup {
+  instruction?: { en: string; zh: string };
+  references?: string[];
+  keys: string[];
+}
+
 export interface ResolvedCase {
   id: string;
   order: number;
@@ -42,6 +48,7 @@ export interface ResolvedCase {
   content: ContentBlock[];
   questions: ResolvedQuestion[];
   requiredCount: number;
+  questionGroups: QuestionGroup[];
 }
 
 export interface SiteConfig {
@@ -52,8 +59,8 @@ export interface SiteConfig {
   defaultLang: 'en' | 'zh';
   allowLangToggle: boolean;
   showNotes: boolean;
-  instruction: { en: string; zh: string };
-  references: string[];
+  instruction?: { en: string; zh: string };
+  references?: string[];
 }
 
 export interface ResolvedConfig {
@@ -61,7 +68,8 @@ export interface ResolvedConfig {
   cases: ResolvedCase[];
 }
 
-const KNOWN_TYPES: QuestionType[] = ['anchor', 'singleChoice', 'text', 'number', 'yesno'];
+const KNOWN_TYPES: QuestionType[] = ['anchor', 'singleChoice', 'checkboxes', 'dropdown', 'text', 'number', 'yesno'];
+const CHOICE_TYPES: QuestionType[] = ['anchor', 'singleChoice', 'checkboxes', 'dropdown'];
 const KNOWN_STYLES = ['paragraph', 'bubble-patient', 'bubble-assistant', 'response', 'source'];
 const KNOWN_THEMES = ['light', 'dark', 'ocean', 'forest', 'high-contrast'];
 
@@ -112,6 +120,37 @@ function stripKeys(node: any): any {
   if (!isPlainObject(node)) return node;
   const { $use, $ref, ...rest } = node;
   return rest;
+}
+
+/**
+ * Normalize `questions` into an ordered list of groups.
+ * Supported shapes:
+ *   - bare array of question objects            -> one implicit group
+ *   - object { items, instruction, references } -> one group
+ *   - array mixing question objects and group objects { items, instruction, references }
+ */
+function parseQuestionGroups(qs: any): Array<{ instruction?: any; references?: any; items: any[] }> {
+  if (Array.isArray(qs)) {
+    const groups: Array<{ instruction?: any; references?: any; items: any[] }> = [];
+    let flat: any[] = [];
+    for (const el of qs) {
+      if (isPlainObject(el) && Array.isArray(el.items)) {
+        if (flat.length > 0) {
+          groups.push({ items: flat });
+          flat = [];
+        }
+        groups.push({ instruction: el.instruction, references: el.references, items: el.items });
+      } else {
+        flat.push(el);
+      }
+    }
+    if (flat.length > 0) groups.push({ items: flat });
+    return groups;
+  }
+  if (isPlainObject(qs)) {
+    return [{ instruction: qs.instruction, references: qs.references, items: qs.items || [] }];
+  }
+  return [{ items: [] }];
 }
 
 @Injectable()
@@ -180,17 +219,27 @@ export class ConfigService implements OnModuleInit {
     return out;
   }
 
-  private materializeCase(rc: any): ResolvedCase {
+  private materializeCase(rc: any, site: any): ResolvedCase {
     const hasResponseB = !!rc.data?.responseB;
-    const questions: ResolvedQuestion[] = (rc.questions || []).map((q: any, i: number) => ({
-      ...q,
-      required: q.required !== false,
-    }));
-    const serveQuestions = questions.filter((q) => {
-      if (!q.appliesIf) return true;
-      if (q.appliesIf.hasResponseB) return hasResponseB;
-      return true;
-    });
+    const groups = parseQuestionGroups(rc.questions);
+    const serveQuestions: ResolvedQuestion[] = [];
+    const questionGroups: QuestionGroup[] = [];
+    for (const g of groups) {
+      const served = g.items
+        .map((q: any) => ({ ...q, required: q.required !== false }))
+        .filter((q: any) => {
+          if (!q.appliesIf) return true;
+          if (q.appliesIf.hasResponseB) return hasResponseB;
+          return true;
+        });
+      if (served.length === 0) continue;
+      serveQuestions.push(...served);
+      questionGroups.push({
+        instruction: g.instruction ?? site?.instruction,
+        references: g.references ?? site?.references,
+        keys: served.map((q: any) => q.key),
+      });
+    }
     const content: ContentBlock[] = (rc.content || []).filter((b: any) => !!rc.data?.[b.key]);
     return {
       id: rc.id,
@@ -201,6 +250,7 @@ export class ConfigService implements OnModuleInit {
       content,
       questions: serveQuestions,
       requiredCount: serveQuestions.filter((q) => q.required).length,
+      questionGroups,
     };
   }
 
@@ -208,7 +258,7 @@ export class ConfigService implements OnModuleInit {
     const resolvedRoot = this.resolveNode(raw, []);
     const site = resolvedRoot.site || {};
     const cases: ResolvedCase[] = (resolvedRoot.cases || [])
-      .map((c: any) => this.materializeCase(c))
+      .map((c: any) => this.materializeCase(c, site))
       .sort((a: ResolvedCase, b: ResolvedCase) => a.order - b.order || a.id.localeCompare(b.id));
     return { site, cases };
   }
@@ -247,7 +297,17 @@ export class ConfigService implements OnModuleInit {
       if (ids.has(c.id)) errors.push(`${label}.id "${c.id}" is duplicated`);
       ids.add(c.id);
       const qKeys = new Set<string>();
-      (c.questions || []).forEach((q: any, j: number) => {
+      const qGroups = parseQuestionGroups(c.questions);
+      qGroups.forEach((g, gi) => {
+        if (g.instruction !== undefined && !isPlainObject(g.instruction)) {
+          errors.push(`${label}.questions[${gi}].instruction must be an object with "en"/"zh"`);
+        }
+        if (g.references !== undefined) {
+          if (!Array.isArray(g.references) || g.references.some((r) => typeof r !== 'string')) {
+            errors.push(`${label}.questions[${gi}].references must be an array of strings`);
+          }
+        }
+        g.items.forEach((q: any, j: number) => {
         const ql = `${label}.questions[${j}]`;
         if (!q.key || typeof q.key !== 'string' || /[^a-zA-Z0-9_-]/.test(q.key)) {
           errors.push(`${ql}.key must match [a-zA-Z0-9_-]`);
@@ -259,7 +319,7 @@ export class ConfigService implements OnModuleInit {
           errors.push(`${ql}.type "${q.type}" is not one of ${KNOWN_TYPES.join(', ')}`);
           return;
         }
-        if (q.type === 'anchor' || q.type === 'singleChoice') {
+        if (CHOICE_TYPES.includes(q.type)) {
           const opts = q.options || [];
           if (opts.length < 2) errors.push(`${ql} (${q.type}) needs at least 2 options`);
           for (const o of opts) {
@@ -277,6 +337,7 @@ export class ConfigService implements OnModuleInit {
           }
         }
         if (q.appliesIf && !isPlainObject(q.appliesIf)) errors.push(`${ql}.appliesIf must be an object`);
+        });
       });
       (c.content || []).forEach((b: any, j: number) => {
         const bl = `${label}.content[${j}]`;
@@ -328,13 +389,20 @@ export class ConfigService implements OnModuleInit {
   }
 
   normalizeAnswer(q: ResolvedQuestion, v: any): any {
-    switch (q.type) {
-      case 'anchor':
-      case 'singleChoice': {
-        const opts = q.options || [];
-        const found = opts.find((o) => o.value === v);
-        return found ? found.value : null;
-      }
+      switch (q.type) {
+        case 'anchor':
+        case 'singleChoice':
+        case 'dropdown': {
+          const opts = q.options || [];
+          const found = opts.find((o) => o.value === v);
+          return found ? found.value : null;
+        }
+        case 'checkboxes': {
+          const opts = q.options || [];
+          const valid = new Set(opts.map((o) => o.value));
+          if (Array.isArray(v)) return v.filter((x) => valid.has(x));
+          return [];
+        }
       case 'number': {
         if (typeof v === 'number' && Number.isFinite(v)) {
           if (q.min !== undefined && v < q.min) return null;
@@ -362,6 +430,7 @@ export class ConfigService implements OnModuleInit {
       const v = answers?.[q.key];
       if (v === null || v === undefined || v === '') missing.push(q.key);
       if (q.type === 'text' && typeof v === 'string' && v.trim() === '') missing.push(q.key);
+      if (q.type === 'checkboxes' && Array.isArray(v) && v.length === 0) missing.push(q.key);
     }
     return missing;
   }
@@ -371,7 +440,10 @@ export class ConfigService implements OnModuleInit {
     if (!answers) return 0;
     return c.questions.filter((q) => {
       const v = this.normalizeAnswer(q, answers[q.key]);
-      return v !== null && v !== undefined && !(q.type === 'text' && String(v).trim() === '');
+      if (v === null || v === undefined) return false;
+      if (q.type === 'text' && String(v).trim() === '') return false;
+      if (q.type === 'checkboxes' && Array.isArray(v) && v.length === 0) return false;
+      return true;
     }).length;
   }
 

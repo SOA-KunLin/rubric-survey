@@ -326,6 +326,7 @@ export default function ScoringPage() {
   const renderQuestion = (q: ResolvedQuestion) => {
     const chosen = answers[q.key];
     const chosenOpt = (q.options || []).find((o) => o.value === chosen);
+    const chosenNo = (q.options || []).findIndex((o) => o.value === chosen) + 1;
     const isCollapsed = collapsed[q.key];
     const name = qName(q, lang);
     const ref = lang === 'zh' && q.refZh ? q.refZh : q.ref;
@@ -337,8 +338,16 @@ export default function ScoringPage() {
           <span className="chosen">
             {isAnswered(q, chosen) ? (
               <>
-                <b>{q.type === 'anchor' || q.type === 'number' ? String(chosen) : ''}</b>
-                {chosenOpt ? ` · ${optionMain(chosenOpt, lang)}` : q.type === 'text' ? ' ✓' : ''}
+                <b>
+                  {q.type === 'checkboxes' && Array.isArray(chosen)
+                    ? `${chosen.length} ✓`
+                    : q.type === 'number' || q.type === 'anchor'
+                      ? String(chosen)
+                      : chosenNo > 0
+                        ? String(chosenNo)
+                        : String(chosen)}
+                </b>
+                {chosenOpt && q.type !== 'checkboxes' ? ` · ${optionMain(chosenOpt, lang)}` : q.type === 'text' ? ' ✓' : ''}
               </>
             ) : (
               '—'
@@ -348,22 +357,52 @@ export default function ScoringPage() {
         </div>
         {!isCollapsed && (
           <div className="dim-body">
-            {(q.type === 'anchor' || q.type === 'singleChoice') && (
-              <>
-                {(q.options || []).map((o) => {
-                  const sel = chosen === o.value;
-                  const secondary = optionSecondary(o, lang);
-                  return (
-                    <div key={String(o.value)} className={`level ${sel ? 'selected' : ''}`} onClick={() => setAnswer(q.key, o.value)}>
-                      <span className="sc">{String(o.value)}</span>
-                      <span className="txt">
-                        <b>{optionMain(o, lang)}</b>
-                        {secondary}
-                      </span>
-                    </div>
-                  );
-                })}
-              </>
+            {(q.type === 'anchor' || q.type === 'singleChoice' || q.type === 'checkboxes') &&
+              (q.options || []).map((o, oi) => {
+                const multi = q.type === 'checkboxes';
+                const arr = multi && Array.isArray(chosen) ? chosen : [];
+                const sel = multi ? arr.includes(o.value) : chosen === o.value;
+                const secondary = optionSecondary(o, lang);
+                return (
+                  <div
+                    key={String(o.value)}
+                    className={`level ${sel ? 'selected' : ''}`}
+                    onClick={() =>
+                      multi
+                        ? setAnswer(q.key, sel ? arr.filter((x) => x !== o.value) : [...arr, o.value])
+                        : setAnswer(q.key, o.value)
+                    }
+                  >
+                    <span className="sc">{oi + 1}</span>
+                    <span className="txt">
+                      <b>{optionMain(o, lang)}</b>
+                      {secondary}
+                    </span>
+                  </div>
+                );
+              })}
+            {q.type === 'dropdown' && (
+              <select
+                value={chosen === null || chosen === undefined ? '' : String(chosen)}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') {
+                    setAnswer(q.key, null);
+                    return;
+                  }
+                  const found = (q.options || []).find((o) => String(o.value) === raw);
+                  setAnswer(q.key, found ? found.value : raw);
+                }}
+                disabled={status === 'submitted'}
+                style={{ maxWidth: 340 }}
+              >
+                <option value="">{t.selectPlaceholder}</option>
+                {(q.options || []).map((o, oi) => (
+                  <option key={String(o.value)} value={String(o.value)}>
+                    {oi + 1}. {optionMain(o, lang)}
+                  </option>
+                ))}
+              </select>
             )}
             {q.type === 'yesno' && (
               <div className="row">
@@ -382,15 +421,19 @@ export default function ScoringPage() {
               </div>
             )}
             {q.type === 'number' && (
-              <input
-                type="number"
-                value={chosen ?? ''}
-                min={q.min}
-                max={q.max}
-                onChange={(e) => setAnswer(q.key, e.target.value === '' ? null : Number(e.target.value))}
-                disabled={status === 'submitted'}
-                style={{ maxWidth: 180 }}
-              />
+              <div className="numfield">
+                <input
+                  type="number"
+                  value={chosen ?? ''}
+                  min={q.min}
+                  max={q.max}
+                  onChange={(e) => setAnswer(q.key, e.target.value === '' ? null : Number(e.target.value))}
+                  disabled={status === 'submitted'}
+                />
+                <span className="unit">
+                  {q.min !== undefined || q.max !== undefined ? `${q.min ?? '-'} – ${q.max ?? '∞'}` : '#'}
+                </span>
+              </div>
             )}
             {q.type === 'text' && (
               <textarea
@@ -469,17 +512,45 @@ export default function ScoringPage() {
         </div>
       )}
 
-      <div className="card">{caseData.content.map(renderBlock)}</div>
+      {caseData.content.length > 0 && <div className="card">{caseData.content.map(renderBlock)}</div>}
 
-      <div className="card">
-        <h2 className="section">{t.dimensions}</h2>
-        {site && (
-          <p className="muted" style={{ marginTop: 0 }}>
-            {lang === 'zh' ? site.instruction.zh : site.instruction.en}
-          </p>
-        )}
-        {questions.map(renderQuestion)}
-      </div>
+      {(() => {
+        const groups = caseData.questionGroups?.length
+          ? caseData.questionGroups
+          : [{ keys: questions.map((q) => q.key), instruction: site?.instruction, references: site?.references }];
+        return groups.map((g, gi) => {
+          const qs = g.keys
+            .map((k) => questions.find((q) => q.key === k))
+            .filter((q): q is ResolvedQuestion => !!q);
+          if (qs.length === 0) return null;
+          const instr = lang === 'zh' ? g.instruction?.zh || g.instruction?.en : g.instruction?.en || g.instruction?.zh;
+          const refs = g.references ?? [];
+          return (
+            <div className="card" key={gi}>
+              <h2 className="section">
+                {t.dimensions}
+                {groups.length > 1 ? ` (${gi + 1}/${groups.length})` : ''}
+              </h2>
+              {instr && (
+                <p className="muted" style={{ marginTop: 0 }}>
+                  {instr}
+                </p>
+              )}
+              {qs.map(renderQuestion)}
+              {refs.length > 0 && (
+                <>
+                  <h2 className="section" style={{ marginTop: 16 }}>{t.references}</h2>
+                  {refs.map((r, i) => (
+                    <div key={i} className="muted" style={{ fontSize: '0.78rem' }}>
+                      {r}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          );
+        });
+      })()}
 
       {site?.showNotes && (
         <div className="card">
@@ -524,16 +595,6 @@ export default function ScoringPage() {
         </div>
       </div>
 
-      {site && site.references.length > 0 && (
-        <div className="card">
-          <h2 className="section">{t.references}</h2>
-          {site.references.map((r, i) => (
-            <div key={i} className="muted" style={{ fontSize: '0.78rem' }}>
-              {r}
-            </div>
-          ))}
-        </div>
-      )}
     </div>
   );
 }

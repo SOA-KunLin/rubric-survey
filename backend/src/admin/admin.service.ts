@@ -25,7 +25,11 @@ function describe(values: number[]): Described {
 }
 
 function isNumericQ(q: ResolvedQuestion): boolean {
-  return q.type === 'anchor' || (q.type === 'singleChoice' && (q.options || []).every((o) => typeof o.value === 'number'));
+  return (
+    q.type === 'anchor' ||
+    ((q.type === 'singleChoice' || q.type === 'dropdown') &&
+      (q.options || []).every((o) => typeof o.value === 'number'))
+  );
 }
 
 @Injectable()
@@ -134,8 +138,22 @@ export class AdminService {
   // ---------- stats ----------
   private questionStats(q: ResolvedQuestion, rows: Rating[]) {
     const raw = rows.map((r) => r.scores?.[q.key]).filter((v) => v !== null && v !== undefined && v !== '');
-    const normalized = raw.map((v) => this.config.normalizeAnswer(q, v)).filter((v) => v !== null);
     const counts: Record<string, number> = {};
+
+    // multi-select: tally each selected option; a row counts once if any selection
+    if (q.type === 'checkboxes') {
+      let n = 0;
+      for (const v of raw) {
+        const clean = this.config.normalizeAnswer(q, Array.isArray(v) ? v : []);
+        if (Array.isArray(clean) && clean.length > 0) {
+          n += 1;
+          for (const x of clean) counts[String(x)] = (counts[String(x)] || 0) + 1;
+        }
+      }
+      return { key: q.key, type: q.type, names: q.names, required: q.required, n, counts, values: [] as number[] };
+    }
+
+    const normalized = raw.map((v) => this.config.normalizeAnswer(q, v)).filter((v) => v !== null);
     for (const v of normalized) counts[String(v)] = (counts[String(v)] || 0) + 1;
     const numeric = isNumericQ(q) ? (normalized as number[]) : [];
     return {

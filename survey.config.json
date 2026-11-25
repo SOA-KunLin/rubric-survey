@@ -12,20 +12,7 @@
     "theme": "light",
     "defaultLang": "zh",
     "allowLangToggle": true,
-    "showNotes": true,
-    "instruction": {
-      "en": "Each dimension is scored on a 5-point scale (1 = worst, 5 = best). Anchors excerpted from the source papers are kept as close to the original wording as possible; anchors marked † were interpolated or adapted to convert the original 3- or 4-point scale into five levels.",
-      "zh": "每個面向以 5 點量表評分(1 = 最差,5 = 最佳)。摘錄自原文的錨點盡量保留原意;標示 † 者為將原始 3 或 4 級量表擴充為 5 級時新增或調整的級距。"
-    },
-    "references": [
-      "[1] Enhancement of the Performance of Large Language Models in Diabetes Education through Retrieval-Augmented Generation: Comparative Study",
-      "[2] Assessment of the information provided by ChatGPT regarding exercise for patients with type 2 diabetes: a pilot study",
-      "[3] DiaGuide-LLM—Using large language models for patient-specific education and health guidance in diabetes",
-      "[4] HealthBench: Evaluating Large Language Models Towards Improved Human Health",
-      "[5] The Effectiveness of a Custom AI Chatbot for Type 2 Diabetes Mellitus Health Literacy: Development and Evaluation Study",
-      "[6] Evaluation of the accuracy and consistency of DeepSeek and ChatGPT in addressing type 1 diabetes mellitus-related queries in adults",
-      "[7] A Systematic Review of Patient Inflammatory Bowel Disease Information Resources on the World Wide Web"
-    ]
+    "showNotes": true
   },
   "templates": {
     "contentStandard": [
@@ -87,45 +74,75 @@
         "collapsible": true
       }
     ],
-    "questionsStandard": [
-      {
-        "$use": "rubric:accuracy"
-      },
-      {
-        "$use": "rubric:comprehensiveness"
-      },
-      {
-        "$use": "rubric:understandability"
-      },
-      {
-        "$use": "rubric:safety"
-      },
-      {
-        "$use": "rubric:utility"
-      },
-      {
-        "$use": "rubric:empathy"
-      },
-      {
-        "$use": "rubric:contextAwareness"
-      },
-      {
-        "$use": "rubric:sourceAttribution"
-      },
-      {
-        "$use": "rubric:consistency"
-      },
-      {
-        "$use": "rubric:globalQuality"
-      }
-    ],
     "caseStandard": {
       "content": {
         "$use": "contentStandard"
       },
-      "questions": {
-        "$use": "questionsStandard"
-      }
+      "questions": [
+        {
+          "$use": "questionsContentQuality"
+        },
+        {
+          "$use": "questionsInteractionQuality"
+        }
+      ]
+    },
+    "questionsContentQuality": {
+      "instruction": {
+        "en": "Part 1 — Content quality. Each dimension is scored on a 5-point scale (1 = worst, 5 = best); judge only the text of the response itself. Anchors marked † were adapted to five levels.",
+        "zh": "第一部——內容品質。每個面向以 5 點量表評分(1 = 最差,5 = 最佳),僅就回應本身的文字內容判斷;標示 † 者為擴充為 5 級時新增或調整的級距。"
+      },
+      "references": [
+        "[1] Enhancement of the Performance of Large Language Models in Diabetes Education through Retrieval-Augmented Generation: Comparative Study",
+        "[2] Assessment of the information provided by ChatGPT regarding exercise for patients with type 2 diabetes: a pilot study",
+        "[7] A Systematic Review of Patient Inflammatory Bowel Disease Information Resources on the World Wide Web"
+      ],
+      "items": [
+        {
+          "$use": "rubric:accuracy"
+        },
+        {
+          "$use": "rubric:comprehensiveness"
+        },
+        {
+          "$use": "rubric:understandability"
+        },
+        {
+          "$use": "rubric:safety"
+        },
+        {
+          "$use": "rubric:utility"
+        },
+        {
+          "$use": "rubric:globalQuality"
+        }
+      ]
+    },
+    "questionsInteractionQuality": {
+      "instruction": {
+        "en": "Part 2 — Interaction quality. These dimensions assess how the response engages with the patient and the conversational context; score each on a 5-point scale (1 = worst, 5 = best).",
+        "zh": "第二部——互動品質。這些面向評估回應與病人感受及對話脈絡的互動,同樣以 5 點量表評分(1 = 最差,5 = 最佳)。"
+      },
+      "references": [
+        "[3] DiaGuide-LLM—Using large language models for patient-specific education and health guidance in diabetes",
+        "[4] HealthBench: Evaluating Large Language Models Towards Improved Human Health",
+        "[5] The Effectiveness of a Custom AI Chatbot for Type 2 Diabetes Mellitus Health Literacy: Development and Evaluation Study",
+        "[6] Evaluation of the accuracy and consistency of DeepSeek and ChatGPT in addressing type 1 diabetes mellitus-related queries in adults"
+      ],
+      "items": [
+        {
+          "$use": "rubric:empathy"
+        },
+        {
+          "$use": "rubric:contextAwareness"
+        },
+        {
+          "$use": "rubric:sourceAttribution"
+        },
+        {
+          "$use": "rubric:consistency"
+        }
+      ]
     }
   },
   "cases": [
@@ -135,7 +152,7 @@
       "active": true,
       "title": {
         "en": "Insulin dose adjustment question",
-        "zh": "胰島素劑量調整諮詢"
+        "zh": "糖尿病衛教機器人回答品質評分"
       },
       "data": {
         "scenario": "A 58-year-old patient with type 2 diabetes on basal insulin asks the chatbot how to adjust the dose after reading a friend’s advice. (Demo case — replace with your own study materials via this config file.)",
@@ -186,7 +203,7 @@
     {
       "id": "case-04-custom",
       "order": 40,
-      "active": false,
+      "active": true,
       "title": {
         "en": "Custom case (example of per-case questions)",
         "zh": "自訂案例(示範案例內自訂題目)"
@@ -222,70 +239,158 @@
           "style": "response"
         }
       ],
-      "questions": [
-        {
-          "$use": "rubric:accuracy"
+      "questions": {
+        "instruction": {
+          "en": "For this quick-feedback case, rate only accuracy and understandability, then answer the two short questions.",
+          "zh": "本快速回饋題組僅需評「正確性」與「易讀性」,並回答兩個簡短問題。"
         },
-        {
-          "$use": "rubric:understandability"
-        },
-        {
-          "key": "reviewMinutes",
-          "type": "number",
-          "required": true,
-          "names": {
-            "en": "Minutes spent on this case",
-            "zh": "本題組花費時間(分鐘)"
+        "references": [
+          "[1] Enhancement of the Performance of Large Language Models in Diabetes Education through Retrieval-Augmented Generation: Comparative Study",
+          "[3] DiaGuide-LLM—Using large language models for patient-specific education and health guidance in diabetes"
+        ],
+        "items": [
+          {
+            "$use": "rubric:accuracy"
           },
-          "min": 1,
-          "max": 240
-        },
-        {
-          "key": "recommendToColleagues",
-          "type": "singleChoice",
-          "required": true,
-          "names": {
-            "en": "Would you recommend this answer style to colleagues?",
-            "zh": "是否會推薦同儕採用此回答風格?"
+          {
+            "$use": "rubric:understandability"
           },
-          "options": [
-            {
-              "value": "yes",
-              "short": {
-                "en": "Yes",
-                "zh": "會"
-              }
+          {
+            "key": "reviewMinutes",
+            "type": "number",
+            "required": true,
+            "names": {
+              "en": "Minutes spent on this case",
+              "zh": "本題組花費時間(分鐘)"
             },
-            {
-              "value": "maybe",
-              "short": {
-                "en": "Maybe",
-                "zh": "看情況"
-              }
+            "min": 1,
+            "max": 240
+          },
+          {
+            "key": "issuesFound",
+            "type": "checkboxes",
+            "required": false,
+            "names": {
+              "en": "Issues found (multi-select)",
+              "zh": "發現的問題(可複選)"
             },
-            {
-              "value": "no",
-              "short": {
-                "en": "No",
-                "zh": "不會"
+            "options": [
+              {
+                "value": "dosage",
+                "short": {
+                  "en": "Dosage error",
+                  "zh": "劑量錯誤"
+                }
+              },
+              {
+                "value": "missing_warning",
+                "short": {
+                  "en": "Missing safety warning",
+                  "zh": "缺少安全警示"
+                }
+              },
+              {
+                "value": "tone",
+                "short": {
+                  "en": "Tone not patient-friendly",
+                  "zh": "語氣不夠親和"
+                }
+              },
+              {
+                "value": "none",
+                "short": {
+                  "en": "No issue",
+                  "zh": "沒有問題"
+                }
               }
+            ]
+          },
+          {
+            "key": "overallGrade",
+            "type": "dropdown",
+            "required": false,
+            "names": {
+              "en": "Overall grade",
+              "zh": "整體評等"
+            },
+            "options": [
+              {
+                "value": "A",
+                "short": {
+                  "en": "Excellent",
+                  "zh": "優"
+                }
+              },
+              {
+                "value": "B",
+                "short": {
+                  "en": "Good",
+                  "zh": "好"
+                }
+              },
+              {
+                "value": "C",
+                "short": {
+                  "en": "Fair",
+                  "zh": "可"
+                }
+              },
+              {
+                "value": "D",
+                "short": {
+                  "en": "Poor",
+                  "zh": "差"
+                }
+              }
+            ]
+          },
+          {
+            "key": "recommendToColleagues",
+            "type": "singleChoice",
+            "required": true,
+            "names": {
+              "en": "Would you recommend this answer style to colleagues?",
+              "zh": "是否會推薦同儕採用此回答風格?"
+            },
+            "options": [
+              {
+                "value": "yes",
+                "short": {
+                  "en": "Yes",
+                  "zh": "會"
+                }
+              },
+              {
+                "value": "maybe",
+                "short": {
+                  "en": "Maybe",
+                  "zh": "看情況"
+                }
+              },
+              {
+                "value": "no",
+                "short": {
+                  "en": "No",
+                  "zh": "不會"
+                }
+              }
+            ]
+          },
+          {
+            "key": "freeComment",
+            "type": "text",
+            "required": false,
+            "names": {
+              "en": "Free comment",
+              "zh": "自由意見"
+            },
+            "placeholder": {
+              "en": "Anything else…",
+              "zh": "其他想法…"
             }
-          ]
-        },
-        {
-          "key": "freeComment",
-          "type": "text",
-          "required": false,
-          "names": {
-            "en": "Free comment",
-            "zh": "自由意見"
-          },
-          "placeholder": {
-            "en": "Anything else…",
-            "zh": "其他想法…"
           }
-        }
-      ]
+        ]
+      }
     }
   ]
 }
