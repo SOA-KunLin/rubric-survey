@@ -16,4 +16,8 @@ export class Rater {
 
   @Column({ nullable: true })
   lastSeenAt: string;
+
+  /** personal passcode for "accounts" auth mode (admin-managed) */
+  @Column({ type: 'text', nullable: true })
+  passcode: string | null;
 }

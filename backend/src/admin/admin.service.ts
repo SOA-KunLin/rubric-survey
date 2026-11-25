@@ -32,6 +32,14 @@ function isNumericQ(q: ResolvedQuestion): boolean {
   );
 }
 
+function genPasscode(len = 8): string {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(len);
+  let out = '';
+  for (let i = 0; i < len; i++) out += chars[bytes[i] % chars.length];
+  return out;
+}
+
 @Injectable()
 export class AdminService {
   constructor(
@@ -278,6 +286,80 @@ export class AdminService {
   // ---------- config management ----------
   getConfig() {
     return { raw: this.config.raw, resolved: this.config.resolved };
+  }
+
+  // ---------- rater management ----------
+  async listRaters() {
+    const [raters, allRatings] = await Promise.all([
+      this.raters.find({ order: { createdAt: 'ASC' } }),
+      this.ratings.find(),
+    ]);
+    return raters.map((rt) => {
+      const mine = allRatings.filter((r) => r.raterId === rt.id);
+      const lastActivity = mine.reduce<string | null>(
+        (acc, r) => (!acc || r.updatedAt > acc ? r.updatedAt : acc),
+        rt.lastSeenAt || null,
+      );
+      return {
+        ...rt,
+        submitted: mine.filter((r) => r.status === 'submitted').length,
+        drafts: mine.filter((r) => r.status === 'draft').length,
+        lastActivity,
+      };
+    });
+  }
+
+  async createRater(name: string, passcode?: string) {
+    const clean = String(name ?? '').trim();
+    if (!clean || clean.length > 80) throw new UnauthorizedException('Name must be 1-80 characters');
+    if (await this.raters.findOne({ where: { name: clean } })) {
+      throw new UnauthorizedException('This name already exists');
+    }
+    const code = passcode && passcode.trim() ? passcode.trim() : genPasscode();
+    const rater = this.raters.create({ name: clean, passcode: code, lastSeenAt: new Date().toISOString() });
+    await this.raters.save(rater);
+    return rater;
+  }
+
+  async updateRater(id: string, patch: { passcode?: string; note?: string }) {
+    const rater = await this.raters.findOne({ where: { id } });
+    if (!rater) throw new UnauthorizedException('Rater not found');
+    if (typeof patch.passcode === 'string') {
+      const code = patch.passcode.trim();
+      rater.passcode = code || genPasscode();
+    }
+    if (typeof patch.note === 'string') rater.note = patch.note.slice(0, 200);
+    await this.raters.save(rater);
+    return rater;
+  }
+
+  async deleteRater(id: string) {
+    const rater = await this.raters.findOne({ where: { id } });
+    if (!rater) throw new UnauthorizedException('Rater not found');
+    await this.ratings.delete({ raterId: id });
+    await this.raters.delete(id);
+    return { ok: true };
+  }
+
+  getAuthSettings() {
+    return this.config.site.auth ?? { mode: 'open', accessCode: process.env.SURVEY_ACCESS_CODE ?? 'eval2026' };
+  }
+
+  setAuthSettings(mode: 'open' | 'accounts', accessCode: string) {
+    this.config.setAuthSettings(mode, accessCode);
+    return this.getAuthSettings();
+  }
+
+  /** clear stored data for a fresh rating round */
+  async resetData(scope: 'ratings' | 'all') {
+    const deletedRatings = (await this.ratings.find()).length;
+    await this.ratings.clear();
+    let deletedRaters = 0;
+    if (scope === 'all') {
+      deletedRaters = (await this.raters.find()).length;
+      await this.raters.clear();
+    }
+    return { ok: true, scope, deletedRatings, deletedRaters };
   }
 
   updateConfig(candidate: any) {

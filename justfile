@@ -33,7 +33,7 @@ setup: ensure-deps rebuild-native sync-rubric
     echo "[just] setup complete. Run 'just dev' or 'just start'."
 
 # run dev servers (backend :3001 api / frontend :3000)
-dev: ensure-deps rebuild-native sync-rubric
+dev: stop ensure-deps rebuild-native sync-rubric
     npm --prefix {{root}} run dev
 
 # production build (backend + frontend)
@@ -45,8 +45,33 @@ build: ensure-deps rebuild-native sync-rubric
     echo "[just] build done. Run 'just start'."
 
 # production run (build if needed + serve)
-start: build
+start: stop build
     npm --prefix {{root}} run start
+
+# free ports 3000/3001 by killing leftover processes (fixes EADDRINUSE after Ctrl+C)
+stop:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    freed=0
+    for port in 3000 3001; do
+        pids=""
+        if command -v lsof >/dev/null 2>&1; then
+            pids=$(lsof -t -i tcp:$port 2>/dev/null)
+        elif command -v fuser >/dev/null 2>&1; then
+            pids=$(fuser $port/tcp 2>/dev/null | tr -s ' ' '\n')
+        elif command -v ss >/dev/null 2>&1; then
+            pids=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | sort -u)
+        fi
+        pids=$(echo "$pids" | tr -s ' ' '\n' | grep -v '^$' | sort -u)
+        if [ -n "$pids" ]; then
+            echo "[just] port $port in use — stopping: $(echo $pids | tr '\n' ' ')"
+            kill $pids 2>/dev/null || true
+            sleep 1
+            kill -9 $pids 2>/dev/null || true
+            freed=1
+        fi
+    done
+    [ $freed -eq 1 ] || echo "[just] ports 3000/3001 are free."
 
 # recompile better-sqlite3 against CURRENT node (run after switching node versions;
 # fixes "compiled against a different Node.js version ... NODE_MODULE_VERSION")

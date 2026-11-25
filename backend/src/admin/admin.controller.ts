@@ -1,5 +1,5 @@
 import { Body, Controller, Delete, Get, HttpException, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
-import { IsBoolean, IsObject } from 'class-validator';
+import { IsBoolean, IsIn, IsObject, IsOptional, IsString, Length } from 'class-validator';
 import { Request, Response } from 'express';
 import { AdminService } from './admin.service';
 import { AdminLoginDto } from '../dto/auth.dto';
@@ -16,6 +16,43 @@ class SetActiveDto {
 class UpdateConfigDto {
   @IsObject()
   config!: any;
+}
+
+class ResetDto {
+  @IsIn(['ratings', 'all'])
+  scope!: 'ratings' | 'all';
+}
+
+class CreateRaterDto {
+  @IsString()
+  @Length(1, 80)
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 120)
+  passcode?: string;
+}
+
+class PatchRaterDto {
+  @IsOptional()
+  @IsString()
+  @Length(0, 120)
+  passcode?: string;
+
+  @IsOptional()
+  @IsString()
+  @Length(0, 200)
+  note?: string;
+}
+
+class AuthSettingsDto {
+  @IsIn(['open', 'accounts'])
+  mode!: 'open' | 'accounts';
+
+  @IsString()
+  @Length(1, 120)
+  accessCode!: string;
 }
 
 @Controller('admin')
@@ -75,6 +112,53 @@ export class AdminController {
   async patchCase(@Req() req: Request, @Param('id') id: string, @Body() dto: SetActiveDto) {
     this.service.verifyAdmin(tokenFrom(req));
     return this.service.setActive(id, !!dto.active);
+  }
+
+  @Post('reset')
+  async reset(@Req() req: Request, @Body() dto: ResetDto) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.resetData(dto.scope);
+  }
+
+  // ---------- rater management ----------
+  @Get('raters')
+  async raters(@Req() req: Request) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.listRaters();
+  }
+
+  @Post('raters')
+  async createRater(@Req() req: Request, @Body() dto: CreateRaterDto) {
+    this.service.verifyAdmin(tokenFrom(req));
+    try {
+      return await this.service.createRater(dto.name, dto.passcode);
+    } catch (e: any) {
+      throw new HttpException({ message: e.message }, 400);
+    }
+  }
+
+  @Patch('raters/:id')
+  async patchRater(@Req() req: Request, @Param('id') id: string, @Body() dto: PatchRaterDto) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.updateRater(id, dto);
+  }
+
+  @Delete('raters/:id')
+  async deleteRater(@Req() req: Request, @Param('id') id: string) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.deleteRater(id);
+  }
+
+  @Get('auth-settings')
+  getAuthSettings(@Req() req: Request) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.getAuthSettings();
+  }
+
+  @Put('auth-settings')
+  putAuthSettings(@Req() req: Request, @Body() dto: AuthSettingsDto) {
+    this.service.verifyAdmin(tokenFrom(req));
+    return this.service.setAuthSettings(dto.mode, dto.accessCode);
   }
 
   @Delete('cases/:id')

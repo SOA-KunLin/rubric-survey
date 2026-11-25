@@ -12,7 +12,11 @@
     "theme": "light",
     "defaultLang": "zh",
     "allowLangToggle": true,
-    "showNotes": true
+    "showNotes": true,
+    "auth": {
+      "mode": "open",
+      "accessCode": "eval2026"
+    }
   },
   "templates": {
     "contentStandard": [

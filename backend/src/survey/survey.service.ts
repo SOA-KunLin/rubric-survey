@@ -23,11 +23,23 @@ export class SurveyService {
   }
 
   async authRater(name: string, accessCode: string): Promise<Rater> {
-    const expected = process.env.SURVEY_ACCESS_CODE || 'eval2026';
-    if (accessCode !== expected) {
+    const auth = this.config.site.auth ?? { mode: 'open' as const, accessCode: process.env.SURVEY_ACCESS_CODE ?? 'eval2026' };
+    const clean = name.trim();
+
+    if (auth.mode === 'accounts') {
+      // only pre-registered raters with their personal passcode may log in
+      const rater = await this.raters.findOne({ where: { name: clean } });
+      if (!rater || !rater.passcode || rater.passcode !== accessCode) {
+        throw new UnauthorizedException('Invalid name or passcode');
+      }
+      await this.touch(rater);
+      return rater;
+    }
+
+    // open mode: shared access code, auto-register
+    if (accessCode !== auth.accessCode) {
       throw new UnauthorizedException('Invalid access code');
     }
-    const clean = name.trim();
     let rater = await this.raters.findOne({ where: { name: clean } });
     if (!rater) {
       rater = this.raters.create({ name: clean, lastSeenAt: this.now() });

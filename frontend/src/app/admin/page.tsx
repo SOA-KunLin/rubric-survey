@@ -55,6 +55,16 @@ interface RatingRow {
   submittedAt?: string;
   updatedAt: string;
 }
+interface RaterDetail {
+  id: string;
+  name: string;
+  passcode: string | null;
+  note: string;
+  createdAt: string;
+  lastActivity?: string | null;
+  submitted: number;
+  drafts: number;
+}
 
 export default function AdminPage() {
   const { t, lang, setLang } = useLang();
@@ -62,7 +72,7 @@ export default function AdminPage() {
   const [pw, setPw] = useState('');
   const [loginErr, setLoginErr] = useState('');
   const [site, setSite] = useState<SiteConfig | null>(null);
-  const [tab, setTab] = useState<'overview' | 'stats' | 'submissions' | 'cases'>('overview');
+  const [tab, setTab] = useState<'overview' | 'raters' | 'stats' | 'submissions' | 'cases'>('overview');
   const [ov, setOv] = useState<Overview | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
   const [statCase, setStatCase] = useState('');
@@ -73,6 +83,11 @@ export default function AdminPage() {
   const [cfgRaw, setCfgRaw] = useState('');
   const [cfgMsg, setCfgMsg] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [authSettings, setAuthSettings] = useState<{ mode: 'open' | 'accounts'; accessCode: string } | null>(null);
+  const [authMsg, setAuthMsg] = useState('');
+  const [raterRows, setRaterRows] = useState<RaterDetail[] | null>(null);
+  const [newName, setNewName] = useState('');
+  const [newCode, setNewCode] = useState('');
 
   const authHeaders: Record<string, string> = useMemo(() => {
     const h: Record<string, string> = {};
@@ -117,6 +132,16 @@ export default function AdminPage() {
     }
   }, [authHeaders]);
 
+  const loadAuthSettings = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/admin/auth-settings`, { headers: authHeaders });
+    if (res.ok) setAuthSettings(await res.json());
+  }, [authHeaders]);
+
+  const loadRaters = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/admin/raters`, { headers: authHeaders });
+    if (res.ok) setRaterRows(await res.json());
+  }, [authHeaders]);
+
   const loadRatings = useCallback(async () => {
     const qs = new URLSearchParams();
     if (fStatus) qs.set('status', fStatus);
@@ -142,6 +167,13 @@ export default function AdminPage() {
   useEffect(() => {
     if (!token || tab !== 'cases') return;
     loadConfigRaw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, tab]);
+
+  useEffect(() => {
+    if (!token || tab !== 'raters') return;
+    loadAuthSettings();
+    loadRaters();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, tab]);
 
@@ -269,6 +301,78 @@ export default function AdminPage() {
     loadConfigRaw();
   };
 
+  const doReset = async (scope: 'ratings' | 'all') => {
+    const question = scope === 'all' ? t.resetAllConfirm : t.resetRatingsConfirm;
+    if (!confirm(question)) return;
+    const res = await fetch(`${API_BASE}/admin/reset`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ scope }),
+    });
+    if (res.ok) {
+      setAuthMsg(t.resetDone);
+      loadOverview();
+      loadStats();
+      if (tab === 'submissions') loadRatings();
+      alert(t.resetDone);
+    }
+  };
+
+  const genCode = () => {
+    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+    let s = '';
+    for (let i = 0; i < 8; i++) s += chars[Math.floor(Math.random() * chars.length)];
+    return s;
+  };
+
+  const saveAuthSettings = async () => {
+    if (!authSettings) return;
+    setAuthMsg('');
+    const res = await fetch(`${API_BASE}/admin/auth-settings`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify(authSettings),
+    });
+    if (res.ok) {
+      setAuthMsg(t.saved);
+      loadOverview();
+    }
+  };
+
+  const createRater = async () => {
+    setAuthMsg('');
+    if (!newName.trim()) return;
+    const res = await fetch(`${API_BASE}/admin/raters`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ name: newName.trim(), passcode: newCode.trim() || undefined }),
+    });
+    if (res.ok) {
+      setNewName('');
+      setNewCode('');
+      loadRaters();
+    } else {
+      const data = await res.json().catch(() => null);
+      setAuthMsg(data?.message === 'This name already exists' ? t.nameExists : `${t.addRaterFail}${data?.message || res.status}`);
+    }
+  };
+
+  const regenerateRater = async (r: RaterDetail) => {
+    await fetch(`${API_BASE}/admin/raters/${r.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ passcode: '' }),
+    });
+    loadRaters();
+  };
+
+  const deleteRater = async (r: RaterDetail) => {
+    if (!confirm(t.deleteCaseConfirm(r.name))) return;
+    await fetch(`${API_BASE}/admin/raters/${r.id}`, { method: 'DELETE', headers: authHeaders });
+    loadRaters();
+    loadOverview();
+  };
+
   const exportCsv = async () => {
     const res = await fetch(`${API_BASE}/admin/export`, { headers: authHeaders });
     if (!res.ok) return;
@@ -340,6 +444,7 @@ export default function AdminPage() {
         {(
           [
             ['overview', t.tabOverview],
+            ['raters', t.tabRaters],
             ['stats', t.tabStats],
             ['submissions', t.tabSubmissions],
             ['cases', t.tabCases],
@@ -426,6 +531,131 @@ export default function AdminPage() {
                   )}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+        </>
+      )}
+
+      {tab === 'raters' && (
+        <>
+          <div className="card">
+            <h2 className="section">{t.authMode}</h2>
+            <div className="row" style={{ gap: 18, marginBottom: 8 }}>
+              <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="radio"
+                  checked={authSettings?.mode === 'open'}
+                  onChange={() => setAuthSettings((s) => (s ? { ...s, mode: 'open' } : s))}
+                />
+                {t.authOpen}
+              </label>
+              <label className="muted" style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  type="radio"
+                  checked={authSettings?.mode === 'accounts'}
+                  onChange={() => setAuthSettings((s) => (s ? { ...s, mode: 'accounts' } : s))}
+                />
+                {t.authAccounts}
+              </label>
+            </div>
+            {authSettings?.mode === 'open' && (
+              <label className="field" style={{ maxWidth: 340 }}>
+                {t.sharedCode}
+                <input
+                  value={authSettings.accessCode}
+                  onChange={(e) => setAuthSettings((s) => (s ? { ...s, accessCode: e.target.value } : s))}
+                />
+              </label>
+            )}
+            {authSettings?.mode === 'accounts' && <p className="muted">{t.ratersNote}</p>}
+            <button className="btn primary" onClick={saveAuthSettings} disabled={!authSettings}>
+              {t.save}
+            </button>
+            {authMsg && <div className="msg ok">{authMsg}</div>}
+          </div>
+
+          <div className="card">
+            <h2 className="section">{t.addRater}</h2>
+            <div className="row">
+              <input
+                placeholder={t.raterName}
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                style={{ maxWidth: 220 }}
+              />
+              <input
+                placeholder={t.passcode}
+                value={newCode}
+                onChange={(e) => setNewCode(e.target.value)}
+                style={{ maxWidth: 160 }}
+              />
+              <button className="btn" onClick={() => setNewCode(genCode())}>
+                {t.autoGenerate}
+              </button>
+              <button className="btn primary" onClick={createRater} disabled={!newName.trim()}>
+                {t.addRater}
+              </button>
+            </div>
+          </div>
+
+          <div className="card">
+            <div style={{ overflowX: 'auto' }}>
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>{t.rater}</th>
+                    <th>{t.passcode}</th>
+                    <th>{t.statSubmitted}</th>
+                    <th>{t.statDrafts}</th>
+                    <th>{t.lastActivity}</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(raterRows || []).map((r) => (
+                    <tr key={r.id}>
+                      <td>
+                        <b>{r.name}</b>
+                      </td>
+                      <td>
+                        <code>{r.passcode || '—'}</code>
+                      </td>
+                      <td>{r.submitted}</td>
+                      <td>{r.drafts}</td>
+                      <td>{fmt(r.lastActivity)}</td>
+                      <td className="row">
+                        <button className="btn" onClick={() => regenerateRater(r)}>
+                          {t.regenerate}
+                        </button>
+                        <button className="btn danger" onClick={() => deleteRater(r)}>
+                          {t.delete}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                  {(raterRows || []).length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="muted">
+                        —
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="card">
+            <h2 className="section">{t.dangerZone}</h2>
+            <p className="muted">{t.resetHint}</p>
+            <div className="row">
+              <button className="btn danger" onClick={() => doReset('ratings')}>
+                {t.resetRatings}
+              </button>
+              <button className="btn danger" onClick={() => doReset('all')}>
+                {t.resetAll}
+              </button>
             </div>
           </div>
         </>

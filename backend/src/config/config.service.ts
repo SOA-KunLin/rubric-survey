@@ -61,6 +61,7 @@ export interface SiteConfig {
   showNotes: boolean;
   instruction?: { en: string; zh: string };
   references?: string[];
+  auth?: { mode: 'open' | 'accounts'; accessCode: string };
 }
 
 export interface ResolvedConfig {
@@ -257,6 +258,11 @@ export class ConfigService implements OnModuleInit {
   private resolveConfig(raw: any): ResolvedConfig {
     const resolvedRoot = this.resolveNode(raw, []);
     const site = resolvedRoot.site || {};
+    // auth defaults (config overrides env; env overrides built-in default)
+    site.auth = {
+      mode: site.auth?.mode ?? 'open',
+      accessCode: site.auth?.accessCode ?? process.env.SURVEY_ACCESS_CODE ?? 'eval2026',
+    };
     const cases: ResolvedCase[] = (resolvedRoot.cases || [])
       .map((c: any) => this.materializeCase(c, site))
       .sort((a: ResolvedCase, b: ResolvedCase) => a.order - b.order || a.id.localeCompare(b.id));
@@ -278,6 +284,16 @@ export class ConfigService implements OnModuleInit {
     }
     if (site.defaultLang && !['en', 'zh'].includes(site.defaultLang)) {
       errors.push('site.defaultLang must be "en" or "zh"');
+    }
+    if (site.auth && !isPlainObject(site.auth)) {
+      errors.push('site.auth must be an object');
+    } else if (site.auth) {
+      if (site.auth.mode !== undefined && !['open', 'accounts'].includes(site.auth.mode)) {
+        errors.push('site.auth.mode must be "open" or "accounts"');
+      }
+      if (site.auth.accessCode !== undefined && typeof site.auth.accessCode !== 'string') {
+        errors.push('site.auth.accessCode must be a string');
+      }
     }
     if (site.themeColors && !isPlainObject(site.themeColors)) {
       errors.push('site.themeColors must be an object of CSS variables');
@@ -481,6 +497,13 @@ export class ConfigService implements OnModuleInit {
     fs.writeFileSync(this.configPath, JSON.stringify(candidate, null, 2) + '\n', 'utf-8');
     this.load();
     return { ok: true };
+  }
+
+  /** update login mode / shared access code (hot reload) */
+  setAuthSettings(mode: 'open' | 'accounts', accessCode: string) {
+    this.raw.site ??= {};
+    this.raw.site.auth = { mode, accessCode };
+    this.write();
   }
 
   private write() {
