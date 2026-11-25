@@ -3,12 +3,6 @@ export interface Bilingual {
   zh: string;
 }
 
-export interface RubricLevel {
-  score: number;
-  short: Bilingual;
-  anchor: Bilingual;
-}
-
 export interface QuestionOption {
   value: number | string;
   short?: Bilingual;

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { api, API_BASE } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
 import { applyTheme } from '@/lib/theme';
-import { ResolvedQuestion, SiteConfig, SurveyConfig } from '@/lib/types';
+import { SiteConfig, SurveyConfig } from '@/lib/types';
 
 interface RaterRow {
   id: string;
@@ -682,6 +682,7 @@ export default function AdminPage() {
               <h2 className="section">
                 {t.case}: {caseTitle(selectedStat)} ({t.submittedBy}: {selectedStat.ratersSubmitted})
               </h2>
+              <div style={{ overflowX: 'auto' }}>
               <table className="tbl">
                 <thead>
                   <tr>
@@ -714,11 +715,13 @@ export default function AdminPage() {
                   </tr>
                 </tbody>
               </table>
+              </div>
             </div>
           )}
 
           <div className="card">
             <h2 className="section">{t.perDimensionOverall}</h2>
+            <div style={{ overflowX: 'auto' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -741,10 +744,12 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="card">
             <h2 className="section">{t.rater}</h2>
+            <div style={{ overflowX: 'auto' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -765,6 +770,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
         </>
       )}
@@ -881,6 +887,7 @@ export default function AdminPage() {
           </div>
 
           <div className="card">
+            <div style={{ overflowX: 'auto' }}>
             <table className="tbl">
               <thead>
                 <tr>
@@ -916,6 +923,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
+            </div>
             <p className="muted">* {t.casesTableNote}</p>
           </div>
         </>

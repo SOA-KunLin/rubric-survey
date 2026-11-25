@@ -24,7 +24,7 @@ default:
     @just --list
 
 # first-time setup: install deps + rebuild native + production build
-setup: ensure-deps rebuild-native sync-rubric
+setup: ensure-deps rebuild-native
     #!/usr/bin/env bash
     set -euo pipefail
     echo "[just] building backend & frontend (production) ..."
@@ -33,11 +33,11 @@ setup: ensure-deps rebuild-native sync-rubric
     echo "[just] setup complete. Run 'just dev' or 'just start'."
 
 # run dev servers (backend :3001 api / frontend :3000)
-dev: stop ensure-deps rebuild-native sync-rubric
+dev: stop ensure-deps rebuild-native
     npm --prefix {{root}} run dev
 
 # production build (backend + frontend)
-build: ensure-deps rebuild-native sync-rubric
+build: ensure-deps rebuild-native
     #!/usr/bin/env bash
     set -euo pipefail
     npm --prefix {{backend}} run build
@@ -97,9 +97,6 @@ ensure-deps:
     done
     [ $ok -eq 1 ] && echo "[just] dependencies already installed."
 
-# sync the single-source rubric.json into backend & frontend
-sync-rubric:
-    @node {{root}}/scripts/sync-rubric.mjs
 
 # check whether backend/frontend are listening + show URLs
 status:

@@ -207,7 +207,7 @@
     {
       "id": "case-04-custom",
       "order": 40,
-      "active": true,
+      "active": false,
       "title": {
         "en": "Custom case (example of per-case questions)",
         "zh": "自訂案例(示範案例內自訂題目)"
