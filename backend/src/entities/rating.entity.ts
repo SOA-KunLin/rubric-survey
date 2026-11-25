@@ -15,7 +15,7 @@ export class Rating {
   caseId: string;
 
   @Column({ type: 'simple-json' })
-  scores: Record<string, number | null>;
+  scores: Record<string, any>;
 
   @Column({ default: '' })
   notes: string;

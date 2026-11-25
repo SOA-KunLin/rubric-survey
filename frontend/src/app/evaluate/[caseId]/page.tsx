@@ -5,12 +5,41 @@ import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { api, API_BASE } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { EvalCase, Rating, RubricDimension, rubric } from '@/lib/types';
+import { applyTheme } from '@/lib/theme';
+import {
+  ContentBlock,
+  QuestionOption,
+  ResolvedCase,
+  ResolvedQuestion,
+  SiteConfig,
+} from '@/lib/types';
 
 type SaveState = 'idle' | 'dirty' | 'saving' | 'saved' | 'error';
 
 function localKey(caseId: string) {
   return `rs-local-${caseId}`;
+}
+
+function optionMain(o: QuestionOption, lang: 'en' | 'zh'): string {
+  const b = o.short || o.label;
+  if (!b) return String(o.value);
+  return lang === 'zh' ? b.zh || b.en : b.en || b.zh;
+}
+
+function optionSecondary(o: QuestionOption, lang: 'en' | 'zh'): string {
+  const b = o.anchor;
+  if (!b) return '';
+  return lang === 'zh' ? b.zh || b.en : b.en || b.zh;
+}
+
+function qName(q: ResolvedQuestion, lang: 'en' | 'zh'): string {
+  return lang === 'zh' ? q.names.zh || q.names.en : q.names.en || q.names.zh;
+}
+
+function isAnswered(q: ResolvedQuestion, v: any): boolean {
+  if (v === null || v === undefined || v === '') return false;
+  if (q.type === 'text' && String(v).trim() === '') return false;
+  return true;
 }
 
 export default function ScoringPage() {
@@ -19,36 +48,30 @@ export default function ScoringPage() {
   const { t, lang, setLang } = useLang();
   const router = useRouter();
 
-  const [caseData, setCaseData] = useState<EvalCase | null>(null);
+  const [site, setSite] = useState<SiteConfig | null>(null);
+  const [caseData, setCaseData] = useState<ResolvedCase | null>(null);
   const [siblings, setSiblings] = useState<string[]>([]);
-  const [rating, setRating] = useState<Rating | null>(null);
-  const [scores, setScores] = useState<Record<string, number | null>>({});
+  const [answers, setAnswers] = useState<Record<string, any>>({});
   const [notes, setNotes] = useState('');
   const [status, setStatus] = useState<'draft' | 'submitted' | 'not-started'>('not-started');
   const [saveState, setSaveState] = useState<SaveState>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
   const [localDraft, setLocalDraft] = useState<{ scores: any; notes: string; ts: number } | null>(null);
   const [submitErr, setSubmitErr] = useState('');
-  const [showSource, setShowSource] = useState(false);
+  const [openSource, setOpenSource] = useState<Record<string, boolean>>({});
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const [err, setErr] = useState('');
 
   const token = typeof window !== 'undefined' ? JSON.parse(localStorage.getItem('rs-rater') || 'null')?.token : null;
   const firstLoad = useRef(true);
   const dirtyRef = useRef(false);
-  const payloadRef = useRef({ scores, notes });
-  payloadRef.current = { scores, notes };
+  const payloadRef = useRef({ scores: answers, notes });
+  payloadRef.current = { scores: answers, notes };
 
-  const dims: RubricDimension[] = useMemo(() => {
-    if (!caseData) return [];
-    return rubric.dimensions.filter(
-      (d) => !d.requires || (d.requires === 'responseB' && !!caseData.responseB),
-    );
-  }, [caseData]);
-
+  const questions: ResolvedQuestion[] = useMemo(() => caseData?.questions || [], [caseData]);
   const missing = useMemo(
-    () => dims.filter((d) => !scores[d.key] || scores[d.key]! < 1),
-    [dims, scores],
+    () => questions.filter((q) => q.required && !isAnswered(q, answers[q.key])),
+    [questions, answers],
   );
 
   // ---------- load ----------
@@ -58,20 +81,23 @@ export default function ScoringPage() {
       return;
     }
     Promise.all([
-      api.get<{ cases: EvalCase[] }>(`/survey/cases?token=${token}`),
-      api.get<{ rating: Rating | null }>(`/survey/rating/${caseId}?token=${token}`),
+      api.get<{ site: SiteConfig; cases: ResolvedCase[] }>(`/survey/cases?token=${token}`),
+      api.get<{ rating: any | null }>(`/survey/rating/${caseId}?token=${token}`),
     ])
-      .then(([{ cases }, ratingRes]) => {
+      .then(([{ site, cases }, ratingRes]) => {
         const c = cases.find((x) => x.id === caseId);
         if (!c) {
           setErr(t.noCase);
           return;
         }
+        setSite(site);
+        applyTheme(site);
+        if (!localStorage.getItem('rs-lang') && site.defaultLang) setLang(site.defaultLang);
         setCaseData(c);
         setSiblings(cases.map((x) => x.id));
         const r = ratingRes.rating;
         if (r) {
-          setScores(r.scores || {});
+          setAnswers(r.scores || {});
           setNotes(r.notes || '');
           setStatus(r.status);
           setLastSavedAt(r.updatedAt || null);
@@ -120,23 +146,21 @@ export default function ScoringPage() {
   }, [caseId, token, status]);
 
   const markDirty = useCallback(
-    (s: Record<string, number | null>, n: string) => {
+    (a: Record<string, any>, n: string) => {
       dirtyRef.current = true;
       setSaveState('dirty');
-      localStorage.setItem(localKey(caseId), JSON.stringify({ scores: s, notes: n, ts: Date.now() }));
+      localStorage.setItem(localKey(caseId), JSON.stringify({ scores: a, notes: n, ts: Date.now() }));
     },
     [caseId],
   );
 
-  // debounce autosave on changes
   useEffect(() => {
     if (firstLoad.current || status === 'submitted') return;
     if (!dirtyRef.current) return;
     const h = setTimeout(save, 800);
     return () => clearTimeout(h);
-  }, [scores, notes, save, status]);
+  }, [answers, notes, save, status]);
 
-  // periodic safety save
   useEffect(() => {
     const iv = setInterval(() => {
       if (dirtyRef.current && status !== 'submitted') save();
@@ -148,7 +172,6 @@ export default function ScoringPage() {
     firstLoad.current = false;
   }, [caseData]);
 
-  // save on unload
   useEffect(() => {
     const handler = () => {
       if (dirtyRef.current && status !== 'submitted') {
@@ -167,33 +190,26 @@ export default function ScoringPage() {
   }, [caseId, token, status]);
 
   // ---------- actions ----------
-  const pick = (key: string, score: number) => {
+  const setAnswer = (key: string, value: any) => {
     if (status === 'submitted') return;
-    setScores((prev) => {
-      const next = { ...prev, [key]: score };
+    setAnswers((prev) => {
+      const next = { ...prev, [key]: value };
       markDirty(next, notes);
       return next;
     });
   };
 
-  const clearDim = (key: string) => {
-    if (status === 'submitted') return;
-    setScores((prev) => {
-      const next = { ...prev, [key]: null };
-      markDirty(next, notes);
-      return next;
-    });
-  };
+  const clearAnswer = (key: string) => setAnswer(key, null);
 
   const onNotes = (v: string) => {
     if (status === 'submitted') return;
     setNotes(v);
-    markDirty(scores, v);
+    markDirty(answers, v);
   };
 
   const restoreLocal = () => {
     if (!localDraft) return;
-    setScores(localDraft.scores || {});
+    setAnswers(localDraft.scores || {});
     setNotes(localDraft.notes || '');
     markDirty(localDraft.scores || {}, localDraft.notes || '');
     setLocalDraft(null);
@@ -214,7 +230,7 @@ export default function ScoringPage() {
     try {
       const res = await api.post<{ submittedAt: string }>(
         `/survey/rating/${caseId}/submit?token=${token}`,
-        { scores, notes },
+        { scores: answers, notes },
       );
       setStatus('submitted');
       setLastSavedAt(res.submittedAt);
@@ -234,10 +250,6 @@ export default function ScoringPage() {
       setSubmitErr(t.submitFailed + e.message);
     }
   };
-
-  const idx = siblings.indexOf(caseId);
-  const prevId = idx > 0 ? siblings[idx - 1] : null;
-  const nextId = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
 
   const saveDot =
     saveState === 'saving' ? 'saving' : saveState === 'error' ? 'err' : saveState === 'dirty' ? '' : 'saved';
@@ -269,8 +281,152 @@ export default function ScoringPage() {
     );
   }
 
-  const title = lang === 'zh' && caseData.titleZh ? caseData.titleZh : caseData.title;
-  const scenario = lang === 'zh' && caseData.scenarioZh ? caseData.scenarioZh : caseData.scenario;
+  const idx = siblings.indexOf(caseId);
+  const prevId = idx > 0 ? siblings[idx - 1] : null;
+  const nextId = idx >= 0 && idx < siblings.length - 1 ? siblings[idx + 1] : null;
+  const title = lang === 'zh' ? caseData.title.zh || caseData.title.en : caseData.title.en || caseData.title.zh;
+
+  const renderBlock = (b: ContentBlock, i: number) => {
+    const text = caseData.data[b.key];
+    if (!text) return null;
+    const label = lang === 'zh' ? b.label.zh || b.label.en : b.label.en || b.label.zh;
+    if (b.style === 'source') {
+      const open = openSource[b.key];
+      return (
+        <React.Fragment key={i}>
+          <h2 className="section row spread" style={{ cursor: 'pointer' }} onClick={() => setOpenSource((o) => ({ ...o, [b.key]: !o[b.key] }))}>
+            {label}
+            <button className="btn">{open ? t.hideSource : t.showSource}</button>
+          </h2>
+          {open && (
+            <div className="resp">
+              {text}
+            </div>
+          )}
+        </React.Fragment>
+      );
+    }
+    if (b.style === 'paragraph') {
+      return (
+        <React.Fragment key={i}>
+          <h2 className="section">{label}</h2>
+          <p className="casedesc muted" style={{ marginTop: 0 }}>{text}</p>
+        </React.Fragment>
+      );
+    }
+    const cls = b.style === 'bubble-assistant' ? 'bubble assistant' : b.style === 'response' ? 'resp a' : 'bubble patient';
+    return (
+      <React.Fragment key={i}>
+        <h2 className="section">{label}</h2>
+        <div className={cls}>{text}</div>
+      </React.Fragment>
+    );
+  };
+
+  const renderQuestion = (q: ResolvedQuestion) => {
+    const chosen = answers[q.key];
+    const chosenOpt = (q.options || []).find((o) => o.value === chosen);
+    const isCollapsed = collapsed[q.key];
+    const name = qName(q, lang);
+    const ref = lang === 'zh' && q.refZh ? q.refZh : q.ref;
+    return (
+      <div key={q.key} className="dim">
+        <div className="dim-head" onClick={() => setCollapsed((c) => ({ ...c, [q.key]: !c[q.key] }))}>
+          <span className="name">{name}</span>
+          {ref && <span className="ref">{ref}</span>}
+          <span className="chosen">
+            {isAnswered(q, chosen) ? (
+              <>
+                <b>{q.type === 'anchor' || q.type === 'number' ? String(chosen) : ''}</b>
+                {chosenOpt ? ` · ${optionMain(chosenOpt, lang)}` : q.type === 'text' ? ' ✓' : ''}
+              </>
+            ) : (
+              '—'
+            )}{' '}
+            {isCollapsed ? '▾' : '▴'}
+          </span>
+        </div>
+        {!isCollapsed && (
+          <div className="dim-body">
+            {(q.type === 'anchor' || q.type === 'singleChoice') && (
+              <>
+                {(q.options || []).map((o) => {
+                  const sel = chosen === o.value;
+                  const secondary = optionSecondary(o, lang);
+                  return (
+                    <div key={String(o.value)} className={`level ${sel ? 'selected' : ''}`} onClick={() => setAnswer(q.key, o.value)}>
+                      <span className="sc">{String(o.value)}</span>
+                      <span className="txt">
+                        <b>{optionMain(o, lang)}</b>
+                        {secondary}
+                      </span>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+            {q.type === 'yesno' && (
+              <div className="row">
+                {[
+                  { v: 'yes', label: t.yes },
+                  { v: 'no', label: t.no },
+                ].map((o) => (
+                  <button
+                    key={o.v}
+                    className={`btn ${chosen === o.v ? 'primary' : ''}`}
+                    onClick={() => setAnswer(q.key, o.v)}
+                  >
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+            )}
+            {q.type === 'number' && (
+              <input
+                type="number"
+                value={chosen ?? ''}
+                min={q.min}
+                max={q.max}
+                onChange={(e) => setAnswer(q.key, e.target.value === '' ? null : Number(e.target.value))}
+                disabled={status === 'submitted'}
+                style={{ maxWidth: 180 }}
+              />
+            )}
+            {q.type === 'text' && (
+              <textarea
+                value={chosen ?? ''}
+                placeholder={q.placeholder ? (lang === 'zh' ? q.placeholder.zh : q.placeholder.en) : ''}
+                onChange={(e) => setAnswer(q.key, e.target.value)}
+                disabled={status === 'submitted'}
+                maxLength={5000}
+              />
+            )}
+            <div className="row" style={{ marginTop: 8 }}>
+              <span className="badge gray">{q.required ? t.required : t.optional}</span>
+              {isAnswered(q, chosen) && status !== 'submitted' && (
+                <button className="btn" onClick={() => clearAnswer(q.key)}>
+                  {t.clearScore}
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const savebar = (
+    <div className="savebar">
+      <span className={`dot ${saveDot}`} />
+      <b style={{ fontSize: '0.85rem' }}>{saveText}</b>
+      {lastSavedAt && (
+        <span className="muted">
+          {t.lastSaved}: {new Date(lastSavedAt).toLocaleString()}
+        </span>
+      )}
+      <span className="muted right">{t.autosaveNote}</span>
+    </div>
+  );
 
   return (
     <div className="container">
@@ -281,21 +437,14 @@ export default function ScoringPage() {
             {t.caseBadge} {idx + 1}: {title}
           </small>
         </div>
-        <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
-          {t.langToggle}
-        </button>
+        {(!site || site.allowLangToggle) && (
+          <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
+            {t.langToggle}
+          </button>
+        )}
       </header>
 
-      <div className="savebar">
-        <span className={`dot ${saveDot}`} />
-        <b style={{ fontSize: '0.85rem' }}>{saveText}</b>
-        {lastSavedAt && (
-          <span className="muted">
-            {t.lastSaved}: {new Date(lastSavedAt).toLocaleString()}
-          </span>
-        )}
-        <span className="muted right">{t.autosaveNote}</span>
-      </div>
+      {savebar}
 
       {localDraft && (
         <div className="msg info row spread">
@@ -320,143 +469,37 @@ export default function ScoringPage() {
         </div>
       )}
 
-      {/* ---------- case content ---------- */}
-      <div className="card">
-        {scenario && (
-          <>
-            <h2 className="section">{t.scenario}</h2>
-            <p className="casedesc muted" style={{ marginTop: 0 }}>
-              {scenario}
-            </p>
-          </>
-        )}
+      <div className="card">{caseData.content.map(renderBlock)}</div>
 
-        {caseData.conversation && caseData.conversation.length > 0 && (
-          <>
-            <h2 className="section">{t.conversation}</h2>
-            {caseData.conversation.map((turn, i) => (
-              <div key={i} className={`bubble ${turn.role}`}>
-                <b>{turn.role === 'patient' ? 'Patient / 病人' : 'Assistant / 助手'}</b>
-                <div>{turn.content}</div>
-              </div>
-            ))}
-          </>
-        )}
-
-        <h2 className="section">{t.patientQuery}</h2>
-        <div className="bubble patient">
-          <div>{caseData.patientQuery}</div>
-        </div>
-
-        <h2 className="section">
-          {t.responseA} <span className="badge blue">A</span>
-        </h2>
-        <div className="resp a">{caseData.responseA}</div>
-
-        {caseData.responseB && (
-          <>
-            <h2 className="section">
-              {t.responseB} <span className="badge blue">B</span>
-            </h2>
-            <div className="resp b">{caseData.responseB}</div>
-          </>
-        )}
-
-        {caseData.sourceText && (
-          <>
-            <h2 className="section row spread" style={{ cursor: 'pointer' }} onClick={() => setShowSource(!showSource)}>
-              {t.sourceTitle}
-              <button className="btn">{showSource ? t.hideSource : t.showSource}</button>
-            </h2>
-            {showSource && (
-              <div className="resp">
-                <div className="muted" style={{ marginBottom: 6 }}>
-                  {caseData.sourceTitle}
-                </div>
-                {caseData.sourceText}
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* ---------- dimensions ---------- */}
       <div className="card">
         <h2 className="section">{t.dimensions}</h2>
-        <p className="muted" style={{ marginTop: 0 }}>
-          {t.rubricInstruction}
-        </p>
+        {site && (
+          <p className="muted" style={{ marginTop: 0 }}>
+            {lang === 'zh' ? site.instruction.zh : site.instruction.en}
+          </p>
+        )}
+        {questions.map(renderQuestion)}
+      </div>
 
-        {dims.map((d) => {
-          const chosen = scores[d.key];
-          const isCollapsed = collapsed[d.key];
-          const chosenLevel = d.levels.find((l) => l.score === chosen);
-          return (
-            <div key={d.key} className="dim">
-              <div
-                className="dim-head"
-                onClick={() => setCollapsed((c) => ({ ...c, [d.key]: !c[d.key] }))}
-              >
-                <span className="num">{d.order}</span>
-                <span className="name">{lang === 'zh' ? d.names.zh : d.names.en}</span>
-                <span className="ref">{lang === 'zh' && d.refZh ? d.refZh : d.ref}</span>
-                <span className="chosen">
-                  {chosen ? (
-                    <>
-                      <b>{chosen}</b> · {lang === 'zh' ? chosenLevel!.short.zh : chosenLevel!.short.en}
-                    </>
-                  ) : (
-                    '—'
-                  )}{' '}
-                  {isCollapsed ? '▾' : '▴'}
-                </span>
-              </div>
-              {!isCollapsed && (
-                <div className="dim-body">
-                  {d.levels.map((l) => {
-                    const sel = chosen === l.score;
-                    return (
-                      <div
-                        key={l.score}
-                        className={`level ${sel ? 'selected' : ''}`}
-                        onClick={() => pick(d.key, l.score)}
-                      >
-                        <span className="sc">{l.score}</span>
-                        <span className="txt">
-                          <b>{lang === 'zh' ? l.short.zh : l.short.en}</b>
-                          {lang === 'zh' ? l.anchor.zh : l.anchor.en}
-                        </span>
-                      </div>
-                    );
-                  })}
-                  {chosen && status !== 'submitted' && (
-                    <button className="btn" onClick={() => clearDim(d.key)}>
-                      {t.clearScore}
-                    </button>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
+      {site?.showNotes && (
+        <div className="card">
+          <label className="field" style={{ marginBottom: 0 }}>
+            {t.notes}
+            <textarea
+              value={notes}
+              onChange={(e) => onNotes(e.target.value)}
+              placeholder={t.notesPlaceholder}
+              disabled={status === 'submitted'}
+              maxLength={5000}
+            />
+          </label>
+        </div>
+      )}
 
-        <label className="field" style={{ marginTop: 12 }}>
-          {t.notes}
-          <textarea
-            value={notes}
-            onChange={(e) => onNotes(e.target.value)}
-            placeholder={t.notesPlaceholder}
-            disabled={status === 'submitted'}
-            maxLength={5000}
-          />
-        </label>
-
+      <div className="card">
         {submitErr && <div className="msg err">{submitErr}</div>}
-
-        <div className="row spread" style={{ marginTop: 12 }}>
-          <span className="muted">
-            {missing.length === 0 ? '' : t.missingBeforeSubmit(missing.length)}
-          </span>
+        <div className="row spread" style={{ marginTop: 4 }}>
+          <span className="muted">{missing.length === 0 ? '' : t.missingBeforeSubmit(missing.length)}</span>
           <span className="row">
             {prevId && (
               <Link className="btn" href={`/evaluate/${prevId}`}>
@@ -481,15 +524,16 @@ export default function ScoringPage() {
         </div>
       </div>
 
-      {/* ---------- references ---------- */}
-      <div className="card">
-        <h2 className="section">{t.references}</h2>
-        {rubric.references.map((r, i) => (
-          <div key={i} className="muted" style={{ fontSize: '0.78rem' }}>
-            {r}
-          </div>
-        ))}
-      </div>
+      {site && site.references.length > 0 && (
+        <div className="card">
+          <h2 className="section">{t.references}</h2>
+          {site.references.map((r, i) => (
+            <div key={i} className="muted" style={{ fontSize: '0.78rem' }}>
+              {r}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

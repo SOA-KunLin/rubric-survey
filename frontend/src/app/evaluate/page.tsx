@@ -5,7 +5,8 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { EvalCase } from '@/lib/types';
+import { applyTheme } from '@/lib/theme';
+import { ResolvedCase, SiteConfig } from '@/lib/types';
 
 function savedRater(): { token: string; name: string } | null {
   if (typeof window === 'undefined') return null;
@@ -20,7 +21,8 @@ export default function EvaluateListPage() {
   const { t, lang, setLang } = useLang();
   const router = useRouter();
   const [rater, setRater] = useState<{ token: string; name: string } | null>(null);
-  const [cases, setCases] = useState<EvalCase[] | null>(null);
+  const [site, setSite] = useState<SiteConfig | null>(null);
+  const [cases, setCases] = useState<ResolvedCase[] | null>(null);
   const [err, setErr] = useState('');
 
   useEffect(() => {
@@ -31,8 +33,13 @@ export default function EvaluateListPage() {
     }
     setRater(r);
     api
-      .get<{ rater: any; cases: EvalCase[] }>(`/survey/cases?token=${r.token}`)
-      .then((d) => setCases(d.cases))
+      .get<{ site: SiteConfig; cases: ResolvedCase[] }>(`/survey/cases?token=${r.token}`)
+      .then((d) => {
+        setSite(d.site);
+        applyTheme(d.site);
+        if (!localStorage.getItem('rs-lang') && d.site.defaultLang) setLang(d.site.defaultLang);
+        setCases(d.cases);
+      })
       .catch(() => setErr(t.errorLoad));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -47,19 +54,21 @@ export default function EvaluateListPage() {
     router.push('/');
   };
 
+  const caseTitle = (c: ResolvedCase) => (lang === 'zh' ? c.title.zh || c.title.en : c.title.en || c.title.zh);
+
   return (
     <div className="container">
       <header className="topbar">
         <div className="brand">
-          {t.appName}
-          <small>
-            {rater ? `${t.rater}: ${rater.name}` : ''}
-          </small>
+          {site ? (lang === 'zh' ? site.title.zh : site.title.en) : t.appName}
+          <small>{rater ? `${t.rater}: ${rater.name}` : ''}</small>
         </div>
         <div className="row">
-          <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
-            {t.langToggle}
-          </button>
+          {(!site || site.allowLangToggle) && (
+            <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
+              {t.langToggle}
+            </button>
+          )}
           <button className="btn" onClick={logout}>
             {t.logout}
           </button>
@@ -89,23 +98,19 @@ export default function EvaluateListPage() {
             <h2 className="section">{t.caseList}</h2>
             {cases.length === 0 && <div className="muted">—</div>}
             {cases.map((c, i) => {
-              const answered = c.answeredDimensions ?? 0;
-              const required = c.requiredDimensions ?? 10;
+              const answered = c.answeredCount ?? 0;
+              const required = c.requiredCount ?? 0;
               const isDone = c.myStatus === 'submitted';
               const isDraft = c.myStatus === 'draft';
-              const title = lang === 'zh' && c.titleZh ? c.titleZh : c.title;
               return (
                 <div
                   key={c.id}
                   className="row spread"
-                  style={{
-                    borderTop: i ? '1px solid var(--line)' : 'none',
-                    padding: '12px 0',
-                  }}
+                  style={{ borderTop: i ? '1px solid var(--line)' : 'none', padding: '12px 0' }}
                 >
                   <div>
                     <b>
-                      {t.caseBadge} {i + 1}: {title}
+                      {t.caseBadge} {i + 1}: {caseTitle(c)}
                     </b>
                     <div className="muted">
                       {isDone ? (

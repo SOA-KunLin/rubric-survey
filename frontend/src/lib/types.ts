@@ -1,62 +1,83 @@
+export interface Bilingual {
+  en: string;
+  zh: string;
+}
+
 export interface RubricLevel {
   score: number;
-  short: { en: string; zh: string };
-  anchor: { en: string; zh: string };
+  short: Bilingual;
+  anchor: Bilingual;
 }
 
-export interface RubricDimension {
+export interface QuestionOption {
+  value: number | string;
+  short?: Bilingual;
+  label?: Bilingual;
+  anchor?: Bilingual;
+}
+
+export type QuestionType = 'anchor' | 'singleChoice' | 'text' | 'number' | 'yesno';
+
+export interface ResolvedQuestion {
   key: string;
-  order: number;
-  requires: string | null;
-  names: { en: string; zh: string };
-  ref: string;
+  type: QuestionType;
+  names: Bilingual;
+  ref?: string;
   refZh?: string;
-  levels: RubricLevel[];
+  required: boolean;
+  appliesIf?: { hasResponseB?: boolean };
+  options?: QuestionOption[];
+  min?: number;
+  max?: number;
+  placeholder?: Bilingual;
 }
 
-export interface Rubric {
-  version: string;
-  scoringInstruction: { en: string; zh: string };
+export interface ContentBlock {
+  key: string;
+  label: Bilingual;
+  style: 'paragraph' | 'bubble-patient' | 'bubble-assistant' | 'response' | 'source';
+  collapsible?: boolean;
+}
+
+export interface SiteConfig {
+  title: Bilingual;
+  subtitle: Bilingual;
+  theme: string;
+  themeColors?: Record<string, string>;
+  defaultLang: 'en' | 'zh';
+  allowLangToggle: boolean;
+  showNotes: boolean;
+  instruction: Bilingual;
   references: string[];
-  dimensions: RubricDimension[];
 }
 
-export interface Turn {
-  role: 'patient' | 'assistant';
-  content: string;
-}
-
-export interface EvalCase {
+export interface ResolvedCase {
   id: string;
   order: number;
-  title: string;
-  titleZh: string;
-  scenario: string;
-  scenarioZh: string;
-  conversation: Turn[] | null;
-  patientQuery: string;
-  responseA: string;
-  responseB: string | null;
-  sourceTitle: string;
-  sourceText: string | null;
   active: boolean;
-  createdAt?: string;
+  title: Bilingual;
+  data: Record<string, string>;
+  content: ContentBlock[];
+  questions: ResolvedQuestion[];
+  requiredCount: number;
   myStatus?: string;
   myUpdatedAt?: string | null;
   mySubmittedAt?: string | null;
-  requiredDimensions?: number;
-  answeredDimensions?: number;
+  answeredCount?: number;
+}
+
+export interface SurveyConfig {
+  site: SiteConfig;
+  cases: ResolvedCase[];
 }
 
 export interface Rating {
   id?: string;
   raterId: string;
   caseId: string;
-  scores: Record<string, number | null>;
+  scores: Record<string, any>;
   notes: string;
   status: 'draft' | 'submitted';
   submittedAt?: string | null;
   updatedAt?: string;
 }
-
-export const rubric: Rubric = require('../data/rubric.json');

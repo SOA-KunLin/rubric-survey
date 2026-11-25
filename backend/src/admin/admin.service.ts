@@ -3,27 +3,37 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, In } from 'typeorm';
 import * as crypto from 'crypto';
 import { Rater } from '../entities/rater.entity';
-import { EvalCase } from '../entities/eval-case.entity';
 import { Rating } from '../entities/rating.entity';
-import { RubricService } from '../rubric/rubric.service';
+import { ConfigService, ResolvedCase, ResolvedQuestion } from '../config/config.service';
 
-const CSV_HEADERS = [
-  'rater_id',
-  'rater_name',
-  'case_id',
-  'case_title',
-  'status',
-  'submitted_at',
-  'updated_at',
-];
+interface Described {
+  n: number;
+  mean: number | null;
+  sd: number | null;
+  median: number | null;
+  min: number | null;
+  max: number | null;
+}
+
+function describe(values: number[]): Described {
+  const n = values.length;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mean = n ? values.reduce((a, b) => a + b, 0) / n : null;
+  const sd = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mean!) ** 2, 0) / (n - 1)) : n === 1 ? 0 : null;
+  const median = n ? (n % 2 ? sorted[(n - 1) / 2] : (sorted[n / 2 - 1] + sorted[n / 2]) / 2) : null;
+  return { n, mean, sd, median, min: n ? sorted[0] : null, max: n ? sorted[n - 1] : null };
+}
+
+function isNumericQ(q: ResolvedQuestion): boolean {
+  return q.type === 'anchor' || (q.type === 'singleChoice' && (q.options || []).every((o) => typeof o.value === 'number'));
+}
 
 @Injectable()
 export class AdminService {
   constructor(
     @InjectRepository(Rater) private raters: Repository<Rater>,
-    @InjectRepository(EvalCase) private cases: Repository<EvalCase>,
     @InjectRepository(Rating) private ratings: Repository<Rating>,
-    private rubric: RubricService,
+    private config: ConfigService,
   ) {}
 
   // ---------- auth ----------
@@ -51,11 +61,12 @@ export class AdminService {
 
   // ---------- overview ----------
   async overview() {
-    const [raters, cases, allRatings] = await Promise.all([
+    const [raters, allRatings] = await Promise.all([
       this.raters.find({ order: { createdAt: 'ASC' } }),
-      this.cases.find({ order: { order: 'ASC', createdAt: 'ASC' } }),
       this.ratings.find(),
     ]);
+    const cases = this.config.cases;
+    const activeCases = cases.filter((c) => c.active);
     const byRaterCase = new Map<string, Rating>();
     for (const r of allRatings) byRaterCase.set(`${r.raterId}|${r.caseId}`, r);
 
@@ -79,21 +90,28 @@ export class AdminService {
     }
 
     const caseSummaries = cases.map((c) => {
-      const required = this.rubric.dimensionKeys(!!c.responseB).length;
       const rows = allRatings.filter((r) => r.caseId === c.id);
-      const submitted = rows.filter((r) => r.status === 'submitted').length;
-      const drafts = rows.filter((r) => r.status === 'draft').length;
-      return { id: c.id, title: c.title, titleZh: c.titleZh, order: c.order, active: c.active, hasResponseB: !!c.responseB, requiredDimensions: required, submitted, drafts };
+      return {
+        id: c.id,
+        title: c.title,
+        order: c.order,
+        active: c.active,
+        hasResponseB: !!c.data.responseB,
+        requiredQuestions: c.requiredCount,
+        submitted: rows.filter((r) => r.status === 'submitted').length,
+        drafts: rows.filter((r) => r.status === 'draft').length,
+      };
     });
 
     return {
-      rubricVersion: this.rubric.rubric.version,
+      rubricVersion: this.config.raw.site?.version || 'config-driven',
       totals: {
         raters: raters.length,
         cases: cases.length,
+        activeCases: activeCases.length,
         submitted: allRatings.filter((r) => r.status === 'submitted').length,
         drafts: allRatings.filter((r) => r.status === 'draft').length,
-        expected: raters.length * cases.length,
+        expected: raters.length * activeCases.length,
       },
       raters: raterSummaries,
       cases: caseSummaries,
@@ -114,55 +132,66 @@ export class AdminService {
   }
 
   // ---------- stats ----------
-  private static describe(values: number[]) {
-    const n = values.length;
-    const sorted = [...values].sort((a, b) => a - b);
-    const mean = n ? values.reduce((a, b) => a + b, 0) / n : null;
-    const sd = n > 1 ? Math.sqrt(values.reduce((a, b) => a + (b - mean!) ** 2, 0) / (n - 1)) : n === 1 ? 0 : null;
-    const median = n
-      ? n % 2
-        ? sorted[(n - 1) / 2]
-        : (sorted[n / 2 - 1] + sorted[n / 2]) / 2
-      : null;
-    return { n, mean, sd, median, min: n ? sorted[0] : null, max: n ? sorted[n - 1] : null };
+  private questionStats(q: ResolvedQuestion, rows: Rating[]) {
+    const raw = rows.map((r) => r.scores?.[q.key]).filter((v) => v !== null && v !== undefined && v !== '');
+    const normalized = raw.map((v) => this.config.normalizeAnswer(q, v)).filter((v) => v !== null);
+    const counts: Record<string, number> = {};
+    for (const v of normalized) counts[String(v)] = (counts[String(v)] || 0) + 1;
+    const numeric = isNumericQ(q) ? (normalized as number[]) : [];
+    return {
+      key: q.key,
+      type: q.type,
+      names: q.names,
+      required: q.required,
+      n: normalized.length,
+      counts,
+      ...(isNumericQ(q) ? describe(numeric) : {}),
+      values: numeric,
+    };
+  }
+
+  private caseOverall(c: ResolvedCase, rows: Rating[]): Described {
+    const perRowMeans = rows
+      .map((r) => {
+        const vs = c.questions
+          .filter((q) => isNumericQ(q))
+          .map((q) => r.scores?.[q.key])
+          .filter((v) => typeof v === 'number') as number[];
+        return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
+      })
+      .filter((v): v is number => v !== null);
+    return describe(perRowMeans);
   }
 
   async stats() {
-    const cases = await this.cases.find({ order: { order: 'ASC' } });
-    const ratings = await this.ratings.find({ where: { status: 'submitted' } });
+    const cases = this.config.cases;
+    const submitted = await this.ratings.find({ where: { status: 'submitted' } });
     const allRatings = await this.ratings.find();
 
     const perCase = cases.map((c) => {
-      const rows = ratings.filter((r) => r.caseId === c.id);
+      const rows = submitted.filter((r) => r.caseId === c.id);
       const dims: Record<string, any> = {};
-      for (const d of this.rubric.requiredDimensions(!!c.responseB)) {
-        const values = rows.map((r) => r.scores?.[d.key]).filter((v): v is number => typeof v === 'number');
-        const dist: Record<string, number> = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
-        for (const v of values) dist[String(v)] += 1;
-        dims[d.key] = { ...AdminService.describe(values), dist, values };
-      }
-      const overall = AdminService.describe(
-        rows.map((r) => {
-          const vs = this.rubric.requiredDimensions(!!c.responseB)
-            .map((d) => r.scores?.[d.key])
-            .filter((v): v is number => typeof v === 'number');
-          return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
-        }).filter((v): v is number => v !== null),
-      );
-      return { caseId: c.id, title: c.title, titleZh: c.titleZh, ratersSubmitted: rows.length, dimensions: dims, overall };
+      for (const q of c.questions) dims[q.key] = this.questionStats(q, rows);
+      return {
+        caseId: c.id,
+        title: c.title,
+        ratersSubmitted: rows.length,
+        questions: dims,
+        overall: this.caseOverall(c, rows),
+      };
     });
 
-    // per rater stats
     const raters = await this.raters.find();
     const perRater = raters.map((rt) => {
-      const rows = ratings.filter((r) => r.raterId === rt.id);
+      const rows = submitted.filter((r) => r.raterId === rt.id);
       const perRowMeans = rows
         .map((r) => {
           const c = cases.find((cc) => cc.id === r.caseId);
           if (!c) return null;
-          const vs = this.rubric.requiredDimensions(!!c.responseB)
-            .map((d) => r.scores?.[d.key])
-            .filter((v): v is number => typeof v === 'number');
+          const vs = c.questions
+            .filter((q) => isNumericQ(q))
+            .map((q) => r.scores?.[q.key])
+            .filter((v) => typeof v === 'number') as number[];
           return vs.length ? vs.reduce((a, b) => a + b, 0) / vs.length : null;
         })
         .filter((v): v is number => v !== null);
@@ -171,38 +200,38 @@ export class AdminService {
         name: rt.name,
         submitted: rows.length,
         drafts: allRatings.filter((r) => r.raterId === rt.id && r.status === 'draft').length,
-        meanOverall: AdminService.describe(perRowMeans).mean,
+        meanOverall: describe(perRowMeans).mean,
       };
     });
 
-    // overall per dimension across all cases
-    const perDimension: Record<string, any> = {};
-    for (const d of this.rubric.dimensions) {
+    // overall per question key across cases that include it
+    const perQuestion: Record<string, any> = {};
+    for (const key of this.config.allQuestionKeys()) {
       const values: number[] = [];
-      for (const r of ratings) {
+      for (const r of submitted) {
         const c = cases.find((cc) => cc.id === r.caseId);
-        if (!c) continue;
-        if (!this.rubric.requiredDimensions(!!c.responseB).some((dd) => dd.key === d.key)) continue;
-        const v = r.scores?.[d.key];
+        const q = c?.questions.find((qq) => qq.key === key);
+        if (!q || !isNumericQ(q)) continue;
+        const v = r.scores?.[key];
         if (typeof v === 'number') values.push(v);
       }
-      perDimension[d.key] = AdminService.describe(values);
+      perQuestion[key] = describe(values);
     }
 
-    return { perCase, perRater, perDimension };
+    return { perCase, perRater, perQuestion };
   }
 
   // ---------- export ----------
   async exportCsv() {
-    const [rows, raters, cases] = await Promise.all([
+    const [rows, raters] = await Promise.all([
       this.ratings.find({ order: { updatedAt: 'ASC' } }),
       this.raters.find(),
-      this.cases.find(),
     ]);
+    const cases = this.config.cases;
     const nameMap = new Map(raters.map((r) => [r.id, r.name]));
     const caseMap = new Map(cases.map((c) => [c.id, c]));
-    const dimKeys = this.rubric.dimensions.map((d) => d.key);
-    const headers = [...CSV_HEADERS, ...dimKeys, 'notes'];
+    const qKeys = this.config.allQuestionKeys();
+    const headers = ['rater_id', 'rater_name', 'case_id', 'case_title', 'status', 'submitted_at', 'updated_at', ...qKeys, 'notes'];
     const esc = (s: any) => {
       const str = s === null || s === undefined ? '' : String(s);
       return /[",\n\r]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
@@ -214,11 +243,11 @@ export class AdminService {
         r.raterId,
         nameMap.get(r.raterId) || '',
         r.caseId,
-        c ? c.title : '',
+        c ? c.title.en : '',
         r.status,
         r.submittedAt || '',
         r.updatedAt,
-        ...dimKeys.map((k) => (r.scores?.[k] ?? '')),
+        ...qKeys.map((k) => (r.scores?.[k] ?? '')),
         r.notes,
       ]
         .map(esc)
@@ -228,33 +257,24 @@ export class AdminService {
     return '\uFEFF' + lines.join('\r\n');
   }
 
-  // ---------- case management ----------
-  async upsertCase(dto: any) {
-    const id = String(dto.id || '').trim();
-    if (!id || /[^a-zA-Z0-9_-]/.test(id)) {
-      throw new UnauthorizedException('Case id must be [a-zA-Z0-9_-]');
-    }
-    let c = await this.cases.findOne({ where: { id } });
-    if (!c) {
-      c = this.cases.create();
-    }
-    Object.assign(c, { ...dto, id });
-    if (c.responseB === undefined) c.responseB = null;
-    if (c.conversation === undefined) c.conversation = null;
-    return this.cases.save(c);
+  // ---------- config management ----------
+  getConfig() {
+    return { raw: this.config.raw, resolved: this.config.resolved };
   }
 
-  async patchCase(id: string, dto: { active?: boolean; order?: number }) {
-    const c = await this.cases.findOne({ where: { id } });
-    if (!c) throw new UnauthorizedException('Case not found');
-    if (typeof dto.active === 'boolean') c.active = dto.active;
-    if (typeof dto.order === 'number') c.order = dto.order;
-    return this.cases.save(c);
+  updateConfig(candidate: any) {
+    return this.config.updateConfig(candidate);
   }
 
-  async deleteCase(id: string) {
-    await this.ratings.delete({ caseId: id });
-    await this.cases.delete(id);
+  setActive(caseId: string, active: boolean) {
+    const ok = this.config.setActive(caseId, active);
+    if (!ok) throw new UnauthorizedException('Case not found');
+    return { ok: true };
+  }
+
+  removeCase(caseId: string) {
+    const ok = this.config.removeCase(caseId);
+    if (!ok) throw new UnauthorizedException('Case not found');
     return { ok: true };
   }
 }

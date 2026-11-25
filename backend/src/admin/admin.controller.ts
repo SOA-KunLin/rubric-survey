@@ -1,11 +1,21 @@
-import { BadRequestException, Body, Controller, Delete, Get, HttpException, Param, Patch, Post, Query, Req, Res } from '@nestjs/common';
+import { Body, Controller, Delete, Get, HttpException, Param, Patch, Post, Put, Query, Req, Res } from '@nestjs/common';
+import { IsBoolean, IsObject } from 'class-validator';
 import { Request, Response } from 'express';
 import { AdminService } from './admin.service';
 import { AdminLoginDto } from '../dto/auth.dto';
-import { PatchCaseDto, UpsertCaseDto } from '../dto/case.dto';
 
 function tokenFrom(req: Request): string | undefined {
   return (req.headers['x-admin-token'] as string) || undefined;
+}
+
+class SetActiveDto {
+  @IsBoolean()
+  active!: boolean;
+}
+
+class UpdateConfigDto {
+  @IsObject()
+  config!: any;
 }
 
 @Controller('admin')
@@ -44,21 +54,32 @@ export class AdminController {
     res.send(csv);
   }
 
-  @Post('cases')
-  async createCase(@Req() req: Request, @Body() dto: UpsertCaseDto) {
+  // ---------- survey config ----------
+  @Get('config')
+  getConfig(@Req() req: Request) {
     this.service.verifyAdmin(tokenFrom(req));
-    return this.service.upsertCase(dto);
+    return this.service.getConfig();
+  }
+
+  @Put('config')
+  updateConfig(@Req() req: Request, @Body() dto: UpdateConfigDto) {
+    this.service.verifyAdmin(tokenFrom(req));
+    const res = this.service.updateConfig(dto.config);
+    if (!res.ok) {
+      throw new HttpException({ message: 'Invalid survey config', errors: res.errors }, 400);
+    }
+    return { ok: true, cases: this.service.getConfig().resolved.cases.length };
   }
 
   @Patch('cases/:id')
-  async patchCase(@Req() req: Request, @Param('id') id: string, @Body() dto: PatchCaseDto) {
+  async patchCase(@Req() req: Request, @Param('id') id: string, @Body() dto: SetActiveDto) {
     this.service.verifyAdmin(tokenFrom(req));
-    return this.service.patchCase(id, dto);
+    return this.service.setActive(id, !!dto.active);
   }
 
   @Delete('cases/:id')
   async deleteCase(@Req() req: Request, @Param('id') id: string) {
     this.service.verifyAdmin(tokenFrom(req));
-    return this.service.deleteCase(id);
+    return this.service.removeCase(id);
   }
 }

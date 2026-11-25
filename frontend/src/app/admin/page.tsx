@@ -4,7 +4,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { api, API_BASE } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
-import { rubric } from '@/lib/types';
+import { applyTheme } from '@/lib/theme';
+import { ResolvedQuestion, SiteConfig, SurveyConfig } from '@/lib/types';
 
 interface RaterRow {
   id: string;
@@ -17,68 +18,50 @@ interface RaterRow {
 }
 interface CaseRow {
   id: string;
-  title: string;
-  titleZh: string;
+  title: { en: string; zh: string };
   order: number;
   active: boolean;
   hasResponseB: boolean;
-  requiredDimensions: number;
+  requiredQuestions: number;
   submitted: number;
   drafts: number;
 }
 interface Overview {
-  totals: { raters: number; cases: number; submitted: number; drafts: number; expected: number };
+  totals: { raters: number; cases: number; activeCases: number; submitted: number; drafts: number; expected: number };
   raters: RaterRow[];
   cases: CaseRow[];
   matrix: Record<string, Record<string, string>>;
 }
 interface StatBlock {
   n: number;
-  mean: number | null;
-  sd: number | null;
-  median: number | null;
-  min: number | null;
-  max: number | null;
-  dist?: Record<string, number>;
+  mean?: number | null;
+  sd?: number | null;
+  median?: number | null;
+  counts: Record<string, number>;
 }
 interface Stats {
-  perCase: { caseId: string; title: string; titleZh: string; ratersSubmitted: number; dimensions: Record<string, StatBlock & { values: number[] }>; overall: StatBlock }[];
+  perCase: { caseId: string; title: { en: string; zh: string }; ratersSubmitted: number; questions: Record<string, StatBlock>; overall: StatBlock }[];
   perRater: { raterId: string; name: string; submitted: number; drafts: number; meanOverall: number | null }[];
-  perDimension: Record<string, StatBlock>;
+  perQuestion: Record<string, StatBlock>;
 }
 interface RatingRow {
   id: string;
   raterId: string;
   raterName: string;
   caseId: string;
-  scores: Record<string, number | null>;
+  scores: Record<string, any>;
   notes: string;
   status: string;
   submittedAt?: string;
   updatedAt: string;
 }
 
-const TEMPLATE = {
-  id: 'case-04',
-  order: 40,
-  title: 'Short English title',
-  titleZh: '中文標題',
-  scenario: 'Optional context for the rater',
-  scenarioZh: '選填的情境說明',
-  conversation: [{ role: 'patient', content: '...' }],
-  patientQuery: 'The question the patient asked the chatbot',
-  responseA: 'LLM response A (full text)',
-  responseB: 'Optional second LLM response (needed for the consistency dimension)',
-  sourceTitle: 'Optional source document title (for source attribution)',
-  sourceText: 'Optional source document text',
-  active: true,
-};
-
 export default function AdminPage() {
   const { t, lang, setLang } = useLang();
   const [token, setToken] = useState<string | null>(null);
   const [pw, setPw] = useState('');
   const [loginErr, setLoginErr] = useState('');
+  const [site, setSite] = useState<SiteConfig | null>(null);
   const [tab, setTab] = useState<'overview' | 'stats' | 'submissions' | 'cases'>('overview');
   const [ov, setOv] = useState<Overview | null>(null);
   const [stats, setStats] = useState<Stats | null>(null);
@@ -87,8 +70,8 @@ export default function AdminPage() {
   const [fStatus, setFStatus] = useState('');
   const [fRater, setFRater] = useState('');
   const [fCase, setFCase] = useState('');
-  const [importJson, setImportJson] = useState('');
-  const [importMsg, setImportMsg] = useState('');
+  const [cfgRaw, setCfgRaw] = useState('');
+  const [cfgMsg, setCfgMsg] = useState('');
   const [autoRefresh, setAutoRefresh] = useState(true);
 
   const authHeaders: Record<string, string> = useMemo(() => {
@@ -100,12 +83,19 @@ export default function AdminPage() {
   useEffect(() => {
     const saved = localStorage.getItem('rs-admin');
     if (saved) setToken(saved);
+    api
+      .get<{ site: SiteConfig }>('/survey/site')
+      .then((d) => {
+        setSite(d.site);
+        applyTheme(d.site);
+        if (!localStorage.getItem('rs-lang') && d.site.defaultLang) setLang(d.site.defaultLang);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const loadOverview = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/admin/overview`, {
-      headers: authHeaders,
-    });
+    const res = await fetch(`${API_BASE}/admin/overview`, { headers: authHeaders });
     if (res.status === 401) {
       localStorage.removeItem('rs-admin');
       setToken(null);
@@ -115,10 +105,16 @@ export default function AdminPage() {
   }, [authHeaders]);
 
   const loadStats = useCallback(async () => {
-    const res = await fetch(`${API_BASE}/admin/stats`, {
-      headers: authHeaders,
-    });
+    const res = await fetch(`${API_BASE}/admin/stats`, { headers: authHeaders });
     if (res.ok) setStats(await res.json());
+  }, [authHeaders]);
+
+  const loadConfigRaw = useCallback(async () => {
+    const res = await fetch(`${API_BASE}/admin/config`, { headers: authHeaders });
+    if (res.ok) {
+      const d: { raw: any; resolved: SurveyConfig } = await res.json();
+      setCfgRaw(JSON.stringify(d.raw, null, 2));
+    }
   }, [authHeaders]);
 
   const loadRatings = useCallback(async () => {
@@ -126,9 +122,7 @@ export default function AdminPage() {
     if (fStatus) qs.set('status', fStatus);
     if (fRater) qs.set('raterId', fRater);
     if (fCase) qs.set('caseId', fCase);
-    const res = await fetch(`${API_BASE}/admin/ratings?${qs}`, {
-      headers: authHeaders,
-    });
+    const res = await fetch(`${API_BASE}/admin/ratings?${qs}`, { headers: authHeaders });
     if (res.ok) setRatings(await res.json());
   }, [authHeaders, fStatus, fRater, fCase]);
 
@@ -144,6 +138,12 @@ export default function AdminPage() {
     loadRatings();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, tab, fStatus, fRater, fCase]);
+
+  useEffect(() => {
+    if (!token || tab !== 'cases') return;
+    loadConfigRaw();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, tab]);
 
   useEffect(() => {
     if (!token || !autoRefresh) return;
@@ -166,10 +166,111 @@ export default function AdminPage() {
     }
   };
 
-  const exportCsv = async () => {
-    const res = await fetch(`${API_BASE}/admin/export`, {
-      headers: authHeaders,
+  const questionKeys = useMemo(() => {
+    const out: string[] = [];
+    for (const pc of stats?.perCase || []) {
+      for (const k of Object.keys(pc.questions)) {
+        if (!out.includes(k)) out.push(k);
+      }
+    }
+    return out;
+  }, [stats]);
+
+  const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
+  const fnum = (v: number | null | undefined) =>
+    v === null || v === undefined ? '—' : Number.isInteger(v) ? String(v) : v.toFixed(2);
+  const caseTitle = (c: { title: { en: string; zh: string } }) =>
+    lang === 'zh' ? c.title.zh || c.title.en : c.title.en || c.title.zh;
+
+  const qName = (key: string): string => {
+    // resolve display name from resolved config passed in overview? use stats keys directly
+    return key;
+  };
+
+  const distBar = (counts: Record<string, number>) => {
+    const entries = Object.entries(counts);
+    const total = entries.reduce((a, [, v]) => a + v, 0);
+    if (!total) return <span className="muted">—</span>;
+    const numeric = entries.every(([k]) => Number(k) >= 1 && Number(k) <= 5);
+    if (numeric) {
+      return (
+        <div className="distbar">
+          {[1, 2, 3, 4, 5].map((s) => {
+            const v = counts[String(s)] || 0;
+            return <span key={s} className={`d${s}`} style={{ width: `${(v / total) * 100}%` }} title={`${s}: ${v}`} />;
+          })}
+        </div>
+      );
+    }
+    return (
+      <span className="row" style={{ gap: 6 }}>
+        {entries.map(([k, v]) => (
+          <span key={k} className="badge blue">
+            {k}: {v}
+          </span>
+        ))}
+      </span>
+    );
+  };
+
+  const applyConfig = async () => {
+    setCfgMsg('');
+    try {
+      const parsed = JSON.parse(cfgRaw);
+      const res = await fetch(`${API_BASE}/admin/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', ...authHeaders },
+        body: JSON.stringify({ config: parsed }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data?.errors) {
+          setCfgMsg(`${t.configInvalid} ${data.errors.join(' | ')}`);
+        } else {
+          setCfgMsg(`${t.configInvalid} HTTP ${res.status}${data?.message ? ` (${data.message})` : ''}`);
+        }
+        return;
+      }
+      setCfgMsg(t.configApplied);
+      loadOverview();
+      loadStats();
+    } catch (e: any) {
+      if (e instanceof SyntaxError) {
+        setCfgMsg(`${t.configInvalid} JSON parse error`);
+      } else {
+        setCfgMsg(`${t.configInvalid} ${e.message}`);
+      }
+    }
+  };
+
+  const downloadConfig = () => {
+    const blob = new Blob([cfgRaw], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = 'survey.config.json';
+    a.click();
+  };
+
+  const toggleCase = async (c: CaseRow) => {
+    await fetch(`${API_BASE}/admin/cases/${c.id}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json', ...authHeaders },
+      body: JSON.stringify({ active: !c.active }),
     });
+    loadOverview();
+    loadConfigRaw();
+  };
+
+  const deleteCase = async (c: CaseRow) => {
+    if (!confirm(t.deleteCaseConfirm(caseTitle(c)))) return;
+    await fetch(`${API_BASE}/admin/cases/${c.id}`, { method: 'DELETE', headers: authHeaders });
+    loadOverview();
+    loadStats();
+    loadConfigRaw();
+  };
+
+  const exportCsv = async () => {
+    const res = await fetch(`${API_BASE}/admin/export`, { headers: authHeaders });
     if (!res.ok) return;
     const blob = await res.blob();
     const a = document.createElement('a');
@@ -178,17 +279,16 @@ export default function AdminPage() {
     a.click();
   };
 
-  const fmt = (iso?: string | null) => (iso ? new Date(iso).toLocaleString() : '—');
-  const fnum = (v: number | null | undefined) => (v === null || v === undefined ? '—' : Number.isInteger(v) ? String(v) : v.toFixed(2));
-
   if (!token) {
     return (
       <div className="container" style={{ maxWidth: 520 }}>
         <header className="topbar">
-          <div className="brand">{t.adminConsole}</div>
-          <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
-            {t.langToggle}
-          </button>
+          <div className="brand">{site ? (lang === 'zh' ? site.title.zh : site.title.en) : t.adminConsole}</div>
+          {(!site || site.allowLangToggle) && (
+            <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
+              {t.langToggle}
+            </button>
+          )}
         </header>
         <div className="card">
           <h2 className="section">{t.adminLogin}</h2>
@@ -208,73 +308,6 @@ export default function AdminPage() {
     );
   }
 
-  const dimNames = (key: string) => {
-    const d = rubric.dimensions.find((x) => x.key === key);
-    return d ? (lang === 'zh' ? d.names.zh : d.names.en) : key;
-  };
-
-  const distBar = (dist?: Record<string, number>) => {
-    if (!dist) return null;
-    const total = Object.values(dist).reduce((a, b) => a + b, 0);
-    if (!total) return <span className="muted">—</span>;
-    return (
-      <div className="distbar">
-        {[1, 2, 3, 4, 5].map((s) => {
-          const v = dist[String(s)] || 0;
-          return (
-            <span
-              key={s}
-              className={`d${s}`}
-              style={{ width: `${(v / total) * 100}%` }}
-              title={`${s}★: ${v}`}
-            />
-          );
-        })}
-      </div>
-    );
-  };
-
-  const importCase = async () => {
-    setImportMsg('');
-    try {
-      const obj = JSON.parse(importJson);
-      await api.post('/admin/cases', obj);
-      setImportMsg(t.importOk);
-      setImportJson('');
-      loadOverview();
-      loadStats();
-    } catch (e: any) {
-      setImportMsg(t.importFail + e.message);
-    }
-  };
-
-  const toggleCase = async (c: CaseRow) => {
-    await fetch(`${API_BASE}/admin/cases/${c.id}`, {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', ...authHeaders },
-      body: JSON.stringify({ active: !c.active }),
-    });
-    loadOverview();
-  };
-
-  const deleteCase = async (c: CaseRow) => {
-    if (!confirm(t.deleteCaseConfirm(lang === 'zh' && c.titleZh ? c.titleZh : c.title))) return;
-    await fetch(`${API_BASE}/admin/cases/${c.id}`, {
-      method: 'DELETE',
-      headers: authHeaders,
-    });
-    loadOverview();
-    loadStats();
-  };
-
-  const downloadTemplate = () => {
-    const blob = new Blob([JSON.stringify(TEMPLATE, null, 2)], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = 'case-template.json';
-    a.click();
-  };
-
   const selectedStat = stats?.perCase.find((c) => c.caseId === statCase);
 
   return (
@@ -282,7 +315,7 @@ export default function AdminPage() {
       <header className="topbar">
         <div className="brand">
           {t.adminConsole}
-          <small>{t.autoRefresh}</small>
+          <small>{site ? (lang === 'zh' ? site.title.zh : site.title.en) : ''} · {t.autoRefresh}</small>
         </div>
         <div className="row">
           <label className="muted" style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
@@ -295,9 +328,11 @@ export default function AdminPage() {
           <button className="btn" onClick={() => { localStorage.removeItem('rs-admin'); setToken(null); }}>
             {t.logout}
           </button>
-          <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
-            {t.langToggle}
-          </button>
+          {(!site || site.allowLangToggle) && (
+            <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
+              {t.langToggle}
+            </button>
+          )}
         </div>
       </header>
 
@@ -324,7 +359,9 @@ export default function AdminPage() {
               <div className="k">{t.statRaters}</div>
             </div>
             <div className="statcard">
-              <div className="v">{ov.totals.cases}</div>
+              <div className="v">
+                {ov.totals.activeCases}/{ov.totals.cases}
+              </div>
               <div className="k">{t.statCases}</div>
             </div>
             <div className="statcard">
@@ -351,8 +388,9 @@ export default function AdminPage() {
                   <tr>
                     <th>{t.rater}</th>
                     {ov.cases.map((c, i) => (
-                      <th key={c.id}>
+                      <th key={c.id} style={c.active ? undefined : { opacity: 0.45 }}>
                         {t.case} {i + 1}
+                        {c.active ? '' : ' *'}
                       </th>
                     ))}
                     <th>{t.statSubmitted}</th>
@@ -368,16 +406,13 @@ export default function AdminPage() {
                       {ov.cases.map((c) => {
                         const st = ov.matrix[r.id]?.[c.id];
                         return (
-                          <td
-                            key={c.id}
-                            className={st === 'submitted' ? 'cell-ok' : st === 'draft' ? 'cell-warn' : 'cell-no'}
-                          >
+                          <td key={c.id} className={st === 'submitted' ? 'cell-ok' : st === 'draft' ? 'cell-warn' : 'cell-no'}>
                             {st === 'submitted' ? '✓' : st === 'draft' ? '✎' : '—'}
                           </td>
                         );
                       })}
                       <td>
-                        {r.submitted} / {ov.cases.length}
+                        {r.submitted} / {ov.totals.activeCases}
                       </td>
                       <td>{fmt(r.lastActivity)}</td>
                     </tr>
@@ -405,7 +440,7 @@ export default function AdminPage() {
                 <option value="">— {t.all} —</option>
                 {stats.perCase.map((c, i) => (
                   <option key={c.caseId} value={c.caseId}>
-                    {t.case} {i + 1}: {lang === 'zh' && c.titleZh ? c.titleZh : c.title}
+                    {t.case} {i + 1}: {caseTitle(c)}
                   </option>
                 ))}
               </select>
@@ -415,7 +450,7 @@ export default function AdminPage() {
           {statCase && selectedStat && (
             <div className="card">
               <h2 className="section">
-                {t.case}: {lang === 'zh' && selectedStat.titleZh ? selectedStat.titleZh : selectedStat.title} ({t.submittedBy}: {selectedStat.ratersSubmitted})
+                {t.case}: {caseTitle(selectedStat)} ({t.submittedBy}: {selectedStat.ratersSubmitted})
               </h2>
               <table className="tbl">
                 <thead>
@@ -429,29 +464,22 @@ export default function AdminPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {rubric.dimensions
-                    .filter((d) => selectedStat.dimensions[d.key])
-                    .map((d) => {
-                      const s = selectedStat.dimensions[d.key];
-                      return (
-                        <tr key={d.key}>
-                          <td>
-                            {d.order}. {lang === 'zh' ? d.names.zh : d.names.en}
-                          </td>
-                          <td>{s.n}</td>
-                          <td>{fnum(s.mean)}</td>
-                          <td>{fnum(s.sd)}</td>
-                          <td>{fnum(s.median)}</td>
-                          <td>{distBar(s.dist)}</td>
-                        </tr>
-                      );
-                    })}
+                  {Object.entries(selectedStat.questions).map(([key, s]) => (
+                    <tr key={key}>
+                      <td>{key}</td>
+                      <td>{s.n}</td>
+                      <td>{s.mean !== undefined ? fnum(s.mean) : '—'}</td>
+                      <td>{s.sd !== undefined ? fnum(s.sd) : '—'}</td>
+                      <td>{s.median !== undefined ? fnum(s.median) : '—'}</td>
+                      <td>{distBar(s.counts)}</td>
+                    </tr>
+                  ))}
                   <tr style={{ fontWeight: 700 }}>
                     <td>{t.overall}</td>
                     <td>{selectedStat.overall.n}</td>
-                    <td>{fnum(selectedStat.overall.mean)}</td>
-                    <td>{fnum(selectedStat.overall.sd)}</td>
-                    <td>{fnum(selectedStat.overall.median)}</td>
+                    <td>{fnum(selectedStat.overall.mean ?? null)}</td>
+                    <td>{fnum(selectedStat.overall.sd ?? null)}</td>
+                    <td>{fnum(selectedStat.overall.median ?? null)}</td>
                     <td>—</td>
                   </tr>
                 </tbody>
@@ -472,21 +500,15 @@ export default function AdminPage() {
                 </tr>
               </thead>
               <tbody>
-                {rubric.dimensions.map((d) => {
-                  const s = stats.perDimension[d.key];
-                  if (!s) return null;
-                  return (
-                    <tr key={d.key}>
-                      <td>
-                        {d.order}. {lang === 'zh' ? d.names.zh : d.names.en}
-                      </td>
-                      <td>{s.n}</td>
-                      <td>{fnum(s.mean)}</td>
-                      <td>{fnum(s.sd)}</td>
-                      <td>{fnum(s.median)}</td>
-                    </tr>
-                  );
-                })}
+                {Object.entries(stats.perQuestion).map(([key, s]) => (
+                  <tr key={key}>
+                    <td>{key}</td>
+                    <td>{s.n}</td>
+                    <td>{fnum(s.mean ?? null)}</td>
+                    <td>{fnum(s.sd ?? null)}</td>
+                    <td>{fnum(s.median ?? null)}</td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
@@ -563,9 +585,9 @@ export default function AdminPage() {
                       <th>{t.rater}</th>
                       <th>{t.case}</th>
                       <th>{t.statusFilter}</th>
-                      {rubric.dimensions.map((d) => (
-                        <th key={d.key} title={d.names.en}>
-                          {d.order}
+                      {questionKeys.map((k) => (
+                        <th key={k} title={k}>
+                          {k.length > 8 ? k.slice(0, 8) + '…' : k}
                         </th>
                       ))}
                       <th>{t.updatedAt}</th>
@@ -586,8 +608,8 @@ export default function AdminPage() {
                             <span className="badge warn">{t.statusDraft}</span>
                           )}
                         </td>
-                        {rubric.dimensions.map((d) => (
-                          <td key={d.key}>{r.scores?.[d.key] ?? '—'}</td>
+                        {questionKeys.map((k) => (
+                          <td key={k}>{r.scores?.[k] ?? '—'}</td>
                         ))}
                         <td>{fmt(r.updatedAt)}</td>
                         <td style={{ maxWidth: 260 }}>{r.notes}</td>
@@ -607,7 +629,28 @@ export default function AdminPage() {
         <>
           <div className="card">
             <h2 className="section">{t.tabCases}</h2>
-            <p className="muted">{t.casesTableNote}</p>
+            <p className="muted">{t.configHint}</p>
+            <div className="row" style={{ marginBottom: 10 }}>
+              <button className="btn primary" onClick={applyConfig}>
+                {t.applyConfig}
+              </button>
+              <button className="btn" onClick={loadConfigRaw}>
+                {t.reloadConfig}
+              </button>
+              <button className="btn" onClick={downloadConfig}>
+                {t.downloadConfig}
+              </button>
+            </div>
+            {cfgMsg && <div className={`msg ${cfgMsg.startsWith(t.configInvalid) ? 'err' : 'ok'}`}>{cfgMsg}</div>}
+            <textarea
+              value={cfgRaw}
+              onChange={(e) => setCfgRaw(e.target.value)}
+              style={{ minHeight: 320, fontFamily: 'monospace', fontSize: '0.78rem' }}
+              spellCheck={false}
+            />
+          </div>
+
+          <div className="card">
             <table className="tbl">
               <thead>
                 <tr>
@@ -623,10 +666,10 @@ export default function AdminPage() {
               </thead>
               <tbody>
                 {ov.cases.map((c, i) => (
-                  <tr key={c.id}>
+                  <tr key={c.id} style={c.active ? undefined : { opacity: 0.55 }}>
                     <td>{c.order}</td>
                     <td>{c.id}</td>
-                    <td>{lang === 'zh' && c.titleZh ? c.titleZh : c.title}</td>
+                    <td>{caseTitle(c)}</td>
                     <td>{c.hasResponseB ? '✓' : '—'}</td>
                     <td>{c.active ? t.active : t.inactive}</td>
                     <td>{c.submitted}</td>
@@ -643,27 +686,7 @@ export default function AdminPage() {
                 ))}
               </tbody>
             </table>
-          </div>
-
-          <div className="card">
-            <h2 className="section row spread">
-              {t.importCase}
-              <span className="row">
-                <button className="btn" onClick={downloadTemplate}>
-                  {t.downloadTemplate}
-                </button>
-              </span>
-            </h2>
-            <textarea
-              value={importJson}
-              onChange={(e) => setImportJson(e.target.value)}
-              style={{ minHeight: 220, fontFamily: 'monospace', fontSize: '0.8rem' }}
-              placeholder={JSON.stringify(TEMPLATE, null, 2)}
-            />
-            {importMsg && <div className="msg info">{importMsg}</div>}
-            <button className="btn primary" onClick={importCase} disabled={!importJson.trim()}>
-              {t.importBtn}
-            </button>
+            <p className="muted">* {t.casesTableNote}</p>
           </div>
         </>
       )}

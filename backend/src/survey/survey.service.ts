@@ -2,17 +2,15 @@ import { BadRequestException, Injectable, NotFoundException, UnauthorizedExcepti
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Rater } from '../entities/rater.entity';
-import { EvalCase } from '../entities/eval-case.entity';
 import { Rating } from '../entities/rating.entity';
-import { RubricService } from '../rubric/rubric.service';
+import { ConfigService, ResolvedCase } from '../config/config.service';
 
 @Injectable()
 export class SurveyService {
   constructor(
     @InjectRepository(Rater) private raters: Repository<Rater>,
-    @InjectRepository(EvalCase) private cases: Repository<EvalCase>,
     @InjectRepository(Rating) private ratings: Repository<Rating>,
-    private rubric: RubricService,
+    private config: ConfigService,
   ) {}
 
   private now() {
@@ -49,20 +47,17 @@ export class SurveyService {
   }
 
   async listCasesForRater(raterId: string) {
-    const cases = await this.cases.find({ where: { active: true }, order: { order: 'ASC', createdAt: 'ASC' } });
+    const cases = this.config.activeCases();
     const mine = await this.ratings.find({ where: { raterId } });
     const byCase = new Map(mine.map((r) => [r.caseId, r]));
     return cases.map((c) => {
       const r = byCase.get(c.id);
-      const required = this.rubric.dimensionKeys(!!c.responseB).length;
-      const answered = r ? Object.values(r.scores || {}).filter((v) => typeof v === 'number' && v >= 1).length : 0;
       return {
         ...c,
         myStatus: r ? r.status : 'not-started',
         myUpdatedAt: r ? r.updatedAt : null,
         mySubmittedAt: r ? r.submittedAt : null,
-        requiredDimensions: required,
-        answeredDimensions: Math.min(answered, required),
+        answeredCount: r ? this.config.answeredCount(c, r.scores) : 0,
       };
     });
   }
@@ -71,46 +66,55 @@ export class SurveyService {
     return this.ratings.findOne({ where: { raterId, caseId } });
   }
 
-  async assertCase(caseId: string): Promise<EvalCase> {
-    const c = await this.cases.findOne({ where: { id: caseId } });
-    if (!c) throw new NotFoundException('Case not found');
+  assertCase(caseId: string): ResolvedCase {
+    const c = this.config.caseById(caseId);
+    if (!c || !c.active) throw new NotFoundException('Case not found');
     return c;
   }
 
-  async saveDraft(raterId: string, caseId: string, scores: Record<string, number | null>, notes: string, allowRetract = false) {
-    const c = await this.assertCase(caseId);
+  async saveDraft(raterId: string, caseId: string, answers: Record<string, any>, notes: string) {
+    const c = this.assertCase(caseId);
     let rating = await this.getRating(raterId, caseId);
     if (!rating) {
       rating = this.ratings.create({ raterId, caseId, scores: {}, notes: '' });
     }
-    if (rating.status === 'submitted' && !allowRetract) {
-      throw new BadRequestException('Already submitted; retract first to edit');
-    }
-    rating.scores = this.sanitizeScores(scores);
+    rating.scores = this.config.sanitizeAnswers(c, answers);
     if (typeof notes === 'string') rating.notes = notes.slice(0, 5000);
     rating.status = 'draft';
     rating.submittedAt = null;
     return this.ratings.save(rating);
   }
 
-  async submit(raterId: string, caseId: string, scores: Record<string, number | null> | undefined, notes: string | undefined) {
-    const c = await this.assertCase(caseId);
+  async submit(raterId: string, caseId: string, answers: Record<string, any> | undefined, notes: string | undefined) {
+    const c = this.assertCase(caseId);
     let rating = await this.getRating(raterId, caseId);
     if (!rating) {
       rating = this.ratings.create({ raterId, caseId, scores: {}, notes: '' });
     }
-    if (scores) rating.scores = this.sanitizeScores(scores);
+    if (answers) rating.scores = this.config.sanitizeAnswers(c, answers);
     if (typeof notes === 'string') rating.notes = notes.slice(0, 5000);
-    const missing = this.rubric.validateScores(rating.scores, !!c.responseB);
+    const missing = this.config.missingRequired(c, rating.scores);
     if (missing.length > 0) {
       throw new BadRequestException({
-        message: 'Missing or invalid scores',
+        message: 'Missing required answers',
         missing,
       });
     }
     rating.status = 'submitted';
     rating.submittedAt = this.now();
     return this.ratings.save(rating);
+  }
+
+  /** draft save that also retracts a submitted rating (used by the auto-save path) */
+  async saveDraftAllowRetract(raterId: string, caseId: string, answers: Record<string, any>, notes: string) {
+    const c = this.assertCase(caseId);
+    const existing = await this.getRating(raterId, caseId);
+    if (existing?.status === 'submitted') {
+      existing.status = 'draft';
+      existing.submittedAt = null;
+      await this.ratings.save(existing);
+    }
+    return this.saveDraft(raterId, caseId, answers, notes);
   }
 
   async retract(raterId: string, caseId: string) {
@@ -121,15 +125,5 @@ export class SurveyService {
     rating.status = 'draft';
     rating.submittedAt = null;
     return this.ratings.save(rating);
-  }
-
-  private sanitizeScores(scores: Record<string, any> | undefined | null): Record<string, number | null> {
-    const out: Record<string, number | null> = {};
-    const keys = this.rubric.dimensions.map((d) => d.key);
-    for (const k of keys) {
-      const v = scores?.[k];
-      out[k] = typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 5 ? v : null;
-    }
-    return out;
   }
 }

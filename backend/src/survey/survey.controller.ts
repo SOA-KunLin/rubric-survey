@@ -1,8 +1,9 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, Query } from '@nestjs/common';
+import { Body, Controller, Get, Param, Post, Put, Query } from '@nestjs/common';
 import { SurveyService } from './survey.service';
 import { AuthRaterDto } from '../dto/auth.dto';
 import { SaveDraftDto, SubmitDto } from '../dto/survey.dto';
 import { Rater } from '../entities/rater.entity';
+import { ConfigService } from '../config/config.service';
 
 async function currentRater(service: SurveyService, token: string): Promise<Rater> {
   return service.raterByToken(token);
@@ -10,30 +11,39 @@ async function currentRater(service: SurveyService, token: string): Promise<Rate
 
 @Controller('survey')
 export class SurveyController {
-  constructor(private readonly service: SurveyService) {}
+  constructor(private readonly service: SurveyService, private readonly config: ConfigService) {}
 
   @Post('auth')
   auth(@Body() dto: AuthRaterDto) {
     return this.service.authRater(dto.name, dto.accessCode).then((r) => ({ token: r.id, name: r.name, id: r.id }));
   }
 
+  @Get('site')
+  site() {
+    return { site: this.config.site };
+  }
+
   @Get('cases')
   async cases(@Query('token') token: string) {
     const rater = await currentRater(this.service, token);
-    return { rater: { id: rater.id, name: rater.name }, cases: await this.service.listCasesForRater(rater.id) };
+    return {
+      rater: { id: rater.id, name: rater.name },
+      site: this.config.site,
+      cases: await this.service.listCasesForRater(rater.id),
+    };
   }
 
   @Get('rating/:caseId')
   async rating(@Param('caseId') caseId: string, @Query('token') token: string) {
     const rater = await currentRater(this.service, token);
-    await this.service.assertCase(caseId);
+    this.service.assertCase(caseId);
     return { rating: await this.service.getRating(rater.id, caseId) };
   }
 
   @Put('rating/:caseId/draft')
   async saveDraft(@Param('caseId') caseId: string, @Query('token') token: string, @Body() dto: SaveDraftDto) {
     const rater = await currentRater(this.service, token);
-    const rating = await this.service.saveDraft(rater.id, caseId, dto.scores || {}, dto.notes ?? '', true);
+    const rating = await this.service.saveDraftAllowRetract(rater.id, caseId, dto.scores || {}, dto.notes ?? '');
     return { ok: true, updatedAt: rating.updatedAt, status: rating.status };
   }
 

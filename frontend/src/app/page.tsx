@@ -1,9 +1,11 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
+import { applyTheme } from '@/lib/theme';
+import { SiteConfig } from '@/lib/types';
 
 export default function LandingPage() {
   const { t, lang, setLang } = useLang();
@@ -12,6 +14,20 @@ export default function LandingPage() {
   const [code, setCode] = useState('');
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
+  const [site, setSite] = useState<SiteConfig | null>(null);
+
+  useEffect(() => {
+    api
+      .get<{ site: SiteConfig }>('/survey/site')
+      .then((d) => {
+        setSite(d.site);
+        applyTheme(d.site);
+        const chosen = localStorage.getItem('rs-lang');
+        if (!chosen && d.site.defaultLang) setLang(d.site.defaultLang);
+      })
+      .catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -24,23 +40,28 @@ export default function LandingPage() {
       });
       localStorage.setItem('rs-rater', JSON.stringify({ token: res.token, name: res.name }));
       router.push('/evaluate');
-    } catch (e: any) {
+    } catch {
       setErr(t.wrongCreds);
     } finally {
       setBusy(false);
     }
   };
 
+  const title = site ? (lang === 'zh' ? site.title.zh : site.title.en) : t.appName;
+  const subtitle = site ? (lang === 'zh' ? site.subtitle.zh : site.subtitle.en) : t.appSub;
+
   return (
     <div className="container" style={{ maxWidth: 640 }}>
       <header className="topbar">
         <div className="brand">
-          {t.appName}
-          <small>{t.appSub}</small>
+          {title}
+          <small>{subtitle}</small>
         </div>
-        <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
-          {t.langToggle}
-        </button>
+        {(!site || site.allowLangToggle) && (
+          <button className="btn" onClick={() => setLang(lang === 'en' ? 'zh' : 'en')}>
+            {t.langToggle}
+          </button>
+        )}
       </header>
 
       <div className="card">

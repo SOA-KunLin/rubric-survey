@@ -473,3 +473,89 @@ table.tbl th {
     padding: 14px 12px 60px;
   }
 }
+
+/* ---------- theme presets (selected via survey.config.json site.theme) ---------- */
+html[data-theme='dark'] {
+  --bg: #121722;
+  --card: #1a2130;
+  --ink: #e8ecf5;
+  --muted: #98a2b8;
+  --line: #2c3648;
+  --brand: #7ba2f0;
+  --brand-soft: #232f4a;
+  --ok: #4ade9c;
+  --ok-soft: #143528;
+  --warn: #f0b45c;
+  --warn-soft: #3a2d14;
+  --danger: #f08a80;
+  --danger-soft: #3a1b18;
+}
+html[data-theme='dark'] .level,
+html[data-theme='dark'] input,
+html[data-theme='dark'] select,
+html[data-theme='dark'] textarea,
+html[data-theme='dark'] button.btn {
+  background: #1f2739;
+  color: var(--ink);
+}
+html[data-theme='dark'] button.btn.primary,
+html[data-theme='dark'] button.btn.ok {
+  color: #0d1220;
+}
+html[data-theme='dark'] .savebar {
+  background: rgba(26, 33, 48, 0.92);
+}
+
+html[data-theme='ocean'] {
+  --bg: #eaf4f6;
+  --card: #ffffff;
+  --ink: #123842;
+  --muted: #4f7c8a;
+  --line: #cfe4ea;
+  --brand: #0e7490;
+  --brand-soft: #d9eef4;
+  --ok: #0d9488;
+  --ok-soft: #d9f2ef;
+  --warn: #b45309;
+  --warn-soft: #fdf0dd;
+  --danger: #b91c1c;
+  --danger-soft: #fde8e8;
+}
+
+html[data-theme='forest'] {
+  --bg: #eef4ea;
+  --card: #ffffff;
+  --ink: #1f3324;
+  --muted: #5c7462;
+  --line: #d3e2cb;
+  --brand: #2f6b3a;
+  --brand-soft: #ddefd6;
+  --ok: #2f6b3a;
+  --ok-soft: #ddefd6;
+  --warn: #92600a;
+  --warn-soft: #fbf0d9;
+  --danger: #a03028;
+  --danger-soft: #fbe7e4;
+}
+
+html[data-theme='high-contrast'] {
+  --bg: #ffffff;
+  --card: #ffffff;
+  --ink: #000000;
+  --muted: #222222;
+  --line: #000000;
+  --brand: #0033cc;
+  --brand-soft: #dce6ff;
+  --ok: #00552e;
+  --ok-soft: #d6f5e3;
+  --warn: #7a4b00;
+  --warn-soft: #ffe9c2;
+  --danger: #a80000;
+  --danger-soft: #ffd9d6;
+}
+html[data-theme='high-contrast'] .card,
+html[data-theme='high-contrast'] .dim,
+html[data-theme='high-contrast'] table.tbl th,
+html[data-theme='high-contrast'] table.tbl td {
+  border-width: 2px;
+}
