@@ -32,9 +32,14 @@ setup: ensure-deps rebuild-native
     npm --prefix {{frontend}} run build
     echo "[just] setup complete. Run 'just dev' or 'just start'."
 
-# run dev servers (backend :3001 api / frontend :3000)
-dev: stop ensure-deps rebuild-native
-    npm --prefix {{root}} run dev
+# run dev servers (backend :3001 api / frontend :3000); Ctrl+C stops both cleanly
+dev: ensure-deps rebuild-native check-ports
+    #!/usr/bin/env bash
+    set -uo pipefail
+    npm --prefix {{root}} run dev &
+    CHILD=$!
+    trap 'kill -TERM $CHILD 2>/dev/null; wait $CHILD 2>/dev/null' EXIT INT TERM
+    wait $CHILD
 
 # production build (backend + frontend)
 build: ensure-deps rebuild-native
@@ -44,11 +49,40 @@ build: ensure-deps rebuild-native
     npm --prefix {{frontend}} run build
     echo "[just] build done. Run 'just start'."
 
-# production run (build if needed + serve)
-start: stop build
-    npm --prefix {{root}} run start
+# production run (build if needed + serve); Ctrl+C stops both cleanly
+start: check-ports ensure-deps rebuild-native build
+    #!/usr/bin/env bash
+    set -uo pipefail
+    npm --prefix {{root}} run start &
+    CHILD=$!
+    trap 'kill -TERM $CHILD 2>/dev/null; wait $CHILD 2>/dev/null' EXIT INT TERM
+    wait $CHILD
 
-# free ports 3000/3001 by killing leftover processes (fixes EADDRINUSE after Ctrl+C)
+# fail fast if ports are already taken — never kill blindly
+check-ports:
+    #!/usr/bin/env bash
+    set -uo pipefail
+    bad=0
+    for port in 3000 3001; do
+        pids=""
+        if command -v lsof >/dev/null 2>&1; then
+            pids=$(lsof -t -i tcp:$port 2>/dev/null)
+        elif command -v fuser >/dev/null 2>&1; then
+            pids=$(fuser $port/tcp 2>/dev/null | tr -s ' ' '\n')
+        elif command -v ss >/dev/null 2>&1; then
+            pids=$(ss -tlnp 2>/dev/null | grep ":$port " | grep -oP 'pid=\K[0-9]+' | sort -u)
+        fi
+        pids=$(echo "$pids" | tr -s ' ' '\n' | grep -v '^$' | sort -u)
+        if [ -n "$pids" ]; then
+            echo "[just] port $port is already in use (PID $(echo $pids | tr '\n' ' '))."
+            echo "        Leftover of this app? Run 'just stop'. Otherwise stop that program first."
+            bad=1
+        fi
+    done
+    if [ $bad -eq 1 ]; then exit 1; fi
+    echo "[just] ports 3000/3001 are free."
+
+# manual cleanup: free ports 3000/3001 by killing whatever listens on them
 stop:
     #!/usr/bin/env bash
     set -uo pipefail
@@ -95,7 +129,10 @@ ensure-deps:
             ok=0
         fi
     done
-    [ $ok -eq 1 ] && echo "[just] dependencies already installed."
+    if [ $ok -eq 1 ]; then
+        echo "[just] dependencies already installed."
+    fi
+    exit 0
 
 
 # check whether backend/frontend are listening + show URLs

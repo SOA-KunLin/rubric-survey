@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { api } from '@/lib/api';
 import { useLang } from '@/lib/i18n';
@@ -87,7 +88,7 @@ export default function LandingPage() {
           </button>
         </form>
         <p className="muted" style={{ marginBottom: 0 }}>
-          <a href="/admin">{t.adminLink} →</a>
+          <Link href="/admin">{t.adminLink} →</Link>
         </p>
       </div>
     </div>

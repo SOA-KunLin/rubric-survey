@@ -5,9 +5,9 @@
   "description": "Bilingual LLM-response evaluation rubric survey (Next.js + NestJS, SQLite, autosave, admin console)",
   "scripts": {
     "setup": "npm --prefix backend install && npm --prefix frontend install",
-    "dev": "concurrently -n backend,frontend -c blue,green \"npm --prefix backend run start:dev\" \"npm --prefix frontend run dev\"",
+    "dev": "concurrently -n backend,frontend -c blue,green --kill-others \"npm --prefix backend run start:dev\" \"npm --prefix frontend run dev\"",
     "build": "npm --prefix backend run build && npm --prefix frontend run build",
-    "start": "concurrently -n backend,frontend -c blue,green \"npm --prefix backend run start:prod\" \"npm --prefix frontend run start\"",
+    "start": "concurrently -n backend,frontend -c blue,green --kill-others \"npm --prefix backend run start:prod\" \"npm --prefix frontend run start\"",
     "db:reset": "rm -rf backend/data"
   },
   "devDependencies": {

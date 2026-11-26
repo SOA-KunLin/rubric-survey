@@ -1,5 +1,10 @@
+// API calls go through the Next.js same-origin proxy (/backend-api -> backend /api).
+// When built with a basePath (NEXT_PUBLIC_BASE_PATH), rewrites are served under that
+// prefix too, so the default composes both. NEXT_PUBLIC_API_URL always wins if set.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
 export const API_BASE: string =
-  (process.env.NEXT_PUBLIC_API_URL as string) || '/backend-api';
+  (process.env.NEXT_PUBLIC_API_URL as string) || `${BASE_PATH}/backend-api`;
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${API_BASE}${path}`, {
