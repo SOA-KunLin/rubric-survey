@@ -3,6 +3,7 @@
   "version": "2026-11-26",
   "questions": {
     "accuracy": {
+      "$class": "question",
       "key": "accuracy",
       "type": "anchor",
       "names": {
@@ -70,6 +71,7 @@
       ]
     },
     "comprehensiveness": {
+      "$class": "question",
       "key": "comprehensiveness",
       "type": "anchor",
       "names": {
@@ -137,6 +139,7 @@
       ]
     },
     "understandability": {
+      "$class": "question",
       "key": "understandability",
       "type": "anchor",
       "names": {
@@ -204,6 +207,7 @@
       ]
     },
     "safety": {
+      "$class": "question",
       "key": "safety",
       "type": "anchor",
       "names": {
@@ -271,6 +275,7 @@
       ]
     },
     "utility": {
+      "$class": "question",
       "key": "utility",
       "type": "anchor",
       "names": {
@@ -338,6 +343,7 @@
       ]
     },
     "empathy": {
+      "$class": "question",
       "key": "empathy",
       "type": "anchor",
       "names": {
@@ -406,6 +412,7 @@
       ]
     },
     "contextAwareness": {
+      "$class": "question",
       "key": "contextAwareness",
       "type": "anchor",
       "names": {
@@ -474,6 +481,7 @@
       ]
     },
     "sourceAttribution": {
+      "$class": "question",
       "key": "sourceAttribution",
       "type": "anchor",
       "names": {
@@ -541,6 +549,7 @@
       ]
     },
     "consistency": {
+      "$class": "question",
       "key": "consistency",
       "type": "anchor",
       "names": {
@@ -612,6 +621,7 @@
       ]
     },
     "globalQuality": {
+      "$class": "question",
       "key": "globalQuality",
       "type": "anchor",
       "names": {

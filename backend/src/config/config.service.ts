@@ -225,12 +225,73 @@ export class ConfigService implements OnModuleInit {
     return out;
   }
 
+  /**
+   * Walk a case (or any block subtree) and collect content blocks + question groups.
+   * Dispatch is driven by "$class" first, then duck-typing, so cases may compose
+   * ANY template directly: contentSet / questionGroup / content / question / case.
+   */
+  private collectCaseParts(
+    node: any,
+    site: any,
+    out: { content: any[]; groups: Array<{ instruction?: any; references?: any; items: any[] }> },
+    depth: number,
+  ): void {
+    if (depth > 8) return;
+    if (Array.isArray(node)) {
+      for (const n of node) this.collectCaseParts(n, site, out, depth + 1);
+      return;
+    }
+    if (!isPlainObject(node)) return;
+    const cls = node.$class;
+
+    // questionGroup: a group with its items
+    if (cls === 'questionGroup' || (Array.isArray(node.items) && (node.instruction !== undefined || node.references !== undefined))) {
+      out.groups.push({ instruction: node.instruction, references: node.references, items: node.items });
+      return;
+    }
+    // single question
+    if (cls === 'question' || (node.key && node.type && Array.isArray(node.options))) {
+      out.groups.push({ items: [node] });
+      return;
+    }
+    // single content block
+    if (cls === 'content' || (node.key && node.label !== undefined && !node.items && !node.options)) {
+      if (node.key) out.content.push(node);
+      return;
+    }
+    // containers: cases root / case / contentSet — expand their blocks (+ legacy keys)
+    if (
+      cls === 'cases' || cls === 'case' || cls === 'contentSet' ||
+      node.blocks !== undefined || node.questionGroups !== undefined ||
+      node.content !== undefined || node.questions !== undefined || node.items !== undefined
+    ) {
+      if (node.blocks !== undefined) this.collectCaseParts(node.blocks, site, out, depth + 1);
+      if (Array.isArray(node.questionGroups)) this.collectCaseParts(node.questionGroups, site, out, depth + 1);
+      if (node.content !== undefined) this.collectCaseParts(node.content, site, out, depth + 1);
+      if (node.questions !== undefined) {
+        out.groups.push(...parseQuestionGroups(node.questions));
+      }
+      if (Array.isArray(node.items)) {
+        out.groups.push({ instruction: node.instruction, references: node.references, items: node.items });
+      }
+      return;
+    }
+    // bare typed question without inline options
+    if (node.key && node.type) {
+      out.groups.push({ items: [node] });
+    }
+  }
+
   private materializeCase(rc: any, site: any): ResolvedCase {
     const hasResponseB = !!rc.data?.responseB;
-    const groups = parseQuestionGroups(rc.questions);
+    const out = { content: [] as any[], groups: [] as Array<{ instruction?: any; references?: any; items: any[] }> };
+    this.collectCaseParts(rc, site, out, 0);
+
+    const content: ContentBlock[] = out.content.filter((b) => rc.data?.[b.key]);
+
     const serveQuestions: ResolvedQuestion[] = [];
     const questionGroups: QuestionGroup[] = [];
-    for (const g of groups) {
+    for (const g of out.groups) {
       const served = g.items
         .map((q: any) => ({ ...q, required: q.required !== false }))
         .filter((q: any) => {
@@ -246,7 +307,7 @@ export class ConfigService implements OnModuleInit {
         keys: served.map((q: any) => q.key),
       });
     }
-    const content: ContentBlock[] = (rc.content || []).filter((b: any) => !!rc.data?.[b.key]);
+
     return {
       id: rc.id,
       order: typeof rc.order === 'number' ? rc.order : 100,
@@ -268,7 +329,13 @@ export class ConfigService implements OnModuleInit {
       mode: site.auth?.mode ?? 'open',
       accessCode: site.auth?.accessCode ?? process.env.SURVEY_ACCESS_CODE ?? 'eval2026',
     };
-    const cases: ResolvedCase[] = (resolvedRoot.cases || [])
+    const casesNode = resolvedRoot.cases;
+    const caseNodes: any[] = Array.isArray(casesNode)
+      ? casesNode
+      : isPlainObject(casesNode) && Array.isArray(casesNode.blocks)
+        ? casesNode.blocks
+        : [];
+    const cases: ResolvedCase[] = caseNodes
       .map((c: any) => this.materializeCase(c, site))
       .sort((a: ResolvedCase, b: ResolvedCase) => a.order - b.order || a.id.localeCompare(b.id));
     return { site, cases };
@@ -303,69 +370,120 @@ export class ConfigService implements OnModuleInit {
     if (site.themeColors && !isPlainObject(site.themeColors)) {
       errors.push('site.themeColors must be an object of CSS variables');
     }
-    const cases = resolvedRoot.cases;
-    if (!Array.isArray(cases) || cases.length === 0) {
-      errors.push('cases must be a non-empty array');
+    // ---- template $class validation ----
+    const CLASS_KINDS = ['case', 'contentSet', 'questionGroup', 'question'];
+    const templates: Record<string, any> = resolvedRoot.templates || {};
+    for (const [name, t] of Object.entries(templates)) {
+      if (!isPlainObject(t) || t.$class === undefined) continue;
+      const cl = `templates.${name}`;
+      switch (t.$class) {
+        case 'case':
+          for (const k of ['content', 'blocks', 'questionGroups', 'questions']) {
+            if (t[k] === undefined) continue;
+            const v = t[k];
+            const ok =
+              Array.isArray(v) || (isPlainObject(v) && Array.isArray(v.blocks));
+            if (!ok) errors.push(`${cl}.${k} must be an array or a contentSet object`);
+          }
+          break;
+        case 'contentSet':
+          if (!Array.isArray(t.blocks) && !(isPlainObject(t.blocks) && Array.isArray(t.blocks.blocks))) {
+            errors.push(`${cl}.blocks must be an array of content blocks (or a contentSet reference)`);
+          }
+          break;
+          break;
+        case 'questionGroup':
+          if (!Array.isArray(t.items)) errors.push(`${cl}.items must be an array`);
+          if (t.instruction !== undefined && !isPlainObject(t.instruction)) {
+            errors.push(`${cl}.instruction must be an object with "en"/"zh"`);
+          }
+          if (
+            t.references !== undefined &&
+            (!Array.isArray(t.references) || t.references.some((r) => typeof r !== 'string'))
+          ) {
+            errors.push(`${cl}.references must be an array of strings`);
+          }
+          break;
+        case 'question':
+          if (!t.key) errors.push(`${cl}.key is required`);
+          if (!KNOWN_TYPES.includes(t.type)) errors.push(`${cl}.type "${t.type}" is not one of ${KNOWN_TYPES.join(', ')}`);
+          break;
+        default:
+          errors.push(`${cl}.$class "${t.$class}" is unknown (expected ${CLASS_KINDS.join(' | ')})`);
+      }
+    }
+    const casesNode = resolvedRoot.cases;
+    const cases: any[] = Array.isArray(casesNode)
+      ? casesNode
+      : isPlainObject(casesNode) && Array.isArray(casesNode.blocks)
+        ? casesNode.blocks
+        : [];
+    if (cases.length === 0) {
+      errors.push('cases must be a non-empty array (or an object with a blocks array)');
       return errors;
     }
     const ids = new Set<string>();
     cases.forEach((c: any, i: number) => {
       const label = `cases[${i}]`;
+      if (c.$class !== undefined && c.$class !== 'case') {
+        errors.push(`${label}.$class "${c.$class}" is invalid (expected "case")`);
+      }
       if (!c.id || typeof c.id !== 'string' || /[^a-zA-Z0-9_-]/.test(c.id)) {
         errors.push(`${label}.id must match [a-zA-Z0-9_-]`);
         return;
       }
       if (ids.has(c.id)) errors.push(`${label}.id "${c.id}" is duplicated`);
       ids.add(c.id);
-      const qKeys = new Set<string>();
-      const qGroups = parseQuestionGroups(c.questions);
-      qGroups.forEach((g, gi) => {
-        if (g.instruction !== undefined && !isPlainObject(g.instruction)) {
-          errors.push(`${label}.questions[${gi}].instruction must be an object with "en"/"zh"`);
-        }
-        if (g.references !== undefined) {
-          if (!Array.isArray(g.references) || g.references.some((r) => typeof r !== 'string')) {
-            errors.push(`${label}.questions[${gi}].references must be an array of strings`);
-          }
-        }
-        g.items.forEach((q: any, j: number) => {
-        const ql = `${label}.questions[${j}]`;
-        if (!q.key || typeof q.key !== 'string' || /[^a-zA-Z0-9_-]/.test(q.key)) {
-          errors.push(`${ql}.key must match [a-zA-Z0-9_-]`);
-          return;
-        }
-        if (qKeys.has(q.key)) errors.push(`${ql}.key "${q.key}" is duplicated in case "${c.id}"`);
-        qKeys.add(q.key);
-        if (!KNOWN_TYPES.includes(q.type)) {
-          errors.push(`${ql}.type "${q.type}" is not one of ${KNOWN_TYPES.join(', ')}`);
-          return;
-        }
-        if (CHOICE_TYPES.includes(q.type)) {
-          const opts = q.options || [];
-          if (opts.length < 2) errors.push(`${ql} (${q.type}) needs at least 2 options`);
-          for (const o of opts) {
-            if (o.value === undefined) errors.push(`${ql} has an option without value`);
-          }
-          if (q.type === 'anchor' && opts.some((o: any) => typeof o.value !== 'number')) {
-            errors.push(`${ql} (anchor) option values must be numbers`);
-          }
-        }
-        if (q.type === 'number') {
-          if (q.min !== undefined && typeof q.min !== 'number') errors.push(`${ql}.min must be a number`);
-          if (q.max !== undefined && typeof q.max !== 'number') errors.push(`${ql}.max must be a number`);
-          if (typeof q.min === 'number' && typeof q.max === 'number' && q.min > q.max) {
-            errors.push(`${ql}.min > max`);
-          }
-        }
-        if (q.appliesIf && !isPlainObject(q.appliesIf)) errors.push(`${ql}.appliesIf must be an object`);
-        });
-      });
-      (c.content || []).forEach((b: any, j: number) => {
+      const parts = { content: [] as any[], groups: [] as any[] };
+      this.collectCaseParts(c, null, parts, 0);
+      parts.content.forEach((b: any, j: number) => {
         const bl = `${label}.content[${j}]`;
         if (!b.key) errors.push(`${bl}.key is required`);
         if (b.style && !KNOWN_STYLES.includes(b.style)) {
           errors.push(`${bl}.style "${b.style}" is not one of ${KNOWN_STYLES.join(', ')}`);
         }
+      });
+      const qKeys = new Set<string>();
+      parts.groups.forEach((g, gi) => {
+        if (g.instruction !== undefined && !isPlainObject(g.instruction)) {
+          errors.push(`${label}.questions[group ${gi}].instruction must be an object with "en"/"zh"`);
+        }
+        if (g.references !== undefined) {
+          if (!Array.isArray(g.references) || g.references.some((r) => typeof r !== 'string')) {
+            errors.push(`${label}.questions[group ${gi}].references must be an array of strings`);
+          }
+        }
+        g.items.forEach((q: any, j: number) => {
+          const ql = `${label}.questions[${j}]`;
+          if (!q.key || typeof q.key !== 'string' || /[^a-zA-Z0-9_-]/.test(q.key)) {
+            errors.push(`${ql}.key must match [a-zA-Z0-9_-]`);
+            return;
+          }
+          if (qKeys.has(q.key)) errors.push(`${ql}.key "${q.key}" is duplicated in case "${c.id}"`);
+          qKeys.add(q.key);
+          if (!KNOWN_TYPES.includes(q.type)) {
+            errors.push(`${ql}.type "${q.type}" is not one of ${KNOWN_TYPES.join(', ')}`);
+            return;
+          }
+          if (CHOICE_TYPES.includes(q.type)) {
+            const opts = q.options || [];
+            if (opts.length < 2) errors.push(`${ql} (${q.type}) needs at least 2 options`);
+            for (const o of opts) {
+              if (o.value === undefined) errors.push(`${ql} has an option without value`);
+            }
+            if (q.type === 'anchor' && opts.some((o: any) => typeof o.value !== 'number')) {
+              errors.push(`${ql} (anchor) option values must be numbers`);
+            }
+          }
+          if (q.type === 'number') {
+            if (q.min !== undefined && typeof q.min !== 'number') errors.push(`${ql}.min must be a number`);
+            if (q.max !== undefined && typeof q.max !== 'number') errors.push(`${ql}.max must be a number`);
+            if (typeof q.min === 'number' && typeof q.max === 'number' && q.min > q.max) {
+              errors.push(`${ql}.min > max`);
+            }
+          }
+          if (q.appliesIf && !isPlainObject(q.appliesIf)) errors.push(`${ql}.appliesIf must be an object`);
+        });
       });
     });
     return errors;
@@ -469,8 +587,17 @@ export class ConfigService implements OnModuleInit {
   }
 
   // ---------- config editing (admin) ----------
+  /** case nodes from either legacy array or the "cases" container object */
+  private casesNodes(): any[] {
+    return Array.isArray(this.raw.cases)
+      ? this.raw.cases
+      : isPlainObject(this.raw.cases) && Array.isArray(this.raw.cases.blocks)
+        ? this.raw.cases.blocks
+        : [];
+  }
+
   setActive(caseId: string, active: boolean): boolean {
-    const c = (this.raw.cases || []).find((x: any) => x.id === caseId);
+    const c = this.casesNodes().find((x: any) => x.id === caseId);
     if (!c) return false;
     c.active = active;
     this.write();
@@ -478,10 +605,11 @@ export class ConfigService implements OnModuleInit {
   }
 
   removeCase(caseId: string): boolean {
-    if (!Array.isArray(this.raw.cases)) return false;
-    const before = this.raw.cases.length;
-    this.raw.cases = this.raw.cases.filter((x: any) => x.id !== caseId);
-    if (this.raw.cases.length === before) return false;
+    const nodes = this.casesNodes();
+    const kept = nodes.filter((x: any) => x.id !== caseId);
+    if (kept.length === nodes.length) return false;
+    if (Array.isArray(this.raw.cases)) this.raw.cases = kept;
+    else this.raw.cases.blocks = kept;
     this.write();
     return true;
   }

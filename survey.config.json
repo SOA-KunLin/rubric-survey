@@ -1,5 +1,5 @@
 {
-  "$schemaNote": "Survey configuration. Any node may use \"$use\": \"<templateName>\" or \"$ref\": \"#/json/pointer\" to inherit a definition (deep-merged; inline keys override the template). Templates live under \"templates\"; rubric.json is exposed as \"rubric:<dotted.path>\" (e.g. \"rubric:questions.accuracy\" -> rubric.json -> questions -> accuracy).",
+  "$schemaNote": "Survey configuration. A case composes everything under its \"content\" key: a contentSet whose \"blocks\" may be content blocks (\"$class\":\"content\"), nested contentSets, question groups (\"$class\":\"questionGroup\" with instruction/references/items) or \"$use\"/\"$ref\" references to templates. Classes: \"cases\" (root container), \"case\" (an entry in cases), \"contentSet\", \"content\", \"questionGroup\", \"question\". rubric.json is exposed as \"rubric:<dotted.path>\" (e.g. \"rubric:questions.accuracy\").",
   "site": {
     "title": {
       "en": "LLM Response Quality Evaluation",
@@ -19,70 +19,81 @@
     }
   },
   "templates": {
-    "contentStandard": [
-      {
-        "key": "scenario",
-        "label": {
-          "en": "Scenario",
-          "zh": "情境說明"
+    "contentStandard": {
+      "$class": "contentSet",
+      "blocks": [
+        {
+          "$class": "content",
+          "key": "scenario",
+          "label": {
+            "en": "Scenario",
+            "zh": "情境說明"
+          },
+          "style": "paragraph"
         },
-        "style": "paragraph"
-      },
-      {
-        "key": "turn1",
-        "label": {
-          "en": "Conversation history",
-          "zh": "先前對話紀錄"
+        {
+          "$class": "content",
+          "key": "turn1",
+          "label": {
+            "en": "Conversation history",
+            "zh": "先前對話紀錄"
+          },
+          "style": "bubble-patient"
         },
-        "style": "bubble-patient"
-      },
-      {
-        "key": "turn2",
-        "label": {
-          "en": "Conversation history",
-          "zh": "先前對話紀錄"
+        {
+          "$class": "content",
+          "key": "turn2",
+          "label": {
+            "en": "Conversation history",
+            "zh": "先前對話紀錄"
+          },
+          "style": "bubble-assistant"
         },
-        "style": "bubble-assistant"
-      },
-      {
-        "key": "patientQuery",
-        "label": {
-          "en": "Patient query",
-          "zh": "病人的提問"
+        {
+          "$class": "content",
+          "key": "patientQuery",
+          "label": {
+            "en": "Patient query",
+            "zh": "病人的提問"
+          },
+          "style": "bubble-patient"
         },
-        "style": "bubble-patient"
-      },
-      {
-        "key": "responseA",
-        "label": {
-          "en": "Response A",
-          "zh": "回應 A"
+        {
+          "$class": "content",
+          "key": "responseA",
+          "label": {
+            "en": "Response A",
+            "zh": "回應 A"
+          },
+          "style": "response"
         },
-        "style": "response"
-      },
-      {
-        "key": "responseB",
-        "label": {
-          "en": "Response B (second reply, for consistency)",
-          "zh": "回應 B(第二次回覆,供「一致性」評分)"
+        {
+          "$class": "content",
+          "key": "responseB",
+          "label": {
+            "en": "Response B (second reply, for consistency)",
+            "zh": "回應 B(第二次回覆,供「一致性」評分)"
+          },
+          "style": "response"
         },
-        "style": "response"
-      },
-      {
-        "key": "sourceText",
-        "label": {
-          "en": "Reference source",
-          "zh": "參考來源文件"
-        },
-        "style": "source",
-        "collapsible": true
-      }
-    ],
+        {
+          "$class": "content",
+          "key": "sourceText",
+          "label": {
+            "en": "Reference source",
+            "zh": "參考來源文件"
+          },
+          "style": "source",
+          "collapsible": true
+        }
+      ]
+    },
     "caseStandard": {
-      "content": {
-        "$use": "contentStandard"
-      },
-      "questions": [
+      "$class": "contentSet",
+      "blocks": [
+        {
+          "$use": "contentStandard"
+        },
         {
           "$use": "questionsContentQuality"
         },
@@ -92,6 +103,7 @@
       ]
     },
     "questionsContentQuality": {
+      "$class": "questionGroup",
       "instruction": {
         "en": "Part 1 — Content quality. Each dimension is scored on a 5-point scale (1 = worst, 5 = best); judge only the text of the response itself. Anchors marked † were adapted to five levels.",
         "zh": "第一部——內容品質。每個面向以 5 點量表評分(1 = 最差,5 = 最佳),僅就回應本身的文字內容判斷;標示 † 者為擴充為 5 級時新增或調整的級距。"
@@ -123,6 +135,7 @@
       ]
     },
     "questionsInteractionQuality": {
+      "$class": "questionGroup",
       "instruction": {
         "en": "Part 2 — Interaction quality. These dimensions assess how the response engages with the patient and the conversational context; score each on a 5-point scale (1 = worst, 5 = best).",
         "zh": "第二部——互動品質。這些面向評估回應與病人感受及對話脈絡的互動,同樣以 5 點量表評分(1 = 最差,5 = 最佳)。"
@@ -149,252 +162,282 @@
       ]
     }
   },
-  "cases": [
-    {
-      "id": "case-01",
-      "order": 10,
-      "active": true,
-      "title": {
-        "en": "Insulin dose adjustment question",
-        "zh": "糖尿病衛教機器人回答品質評分"
-      },
-      "data": {
-        "scenario": "A 58-year-old patient with type 2 diabetes on basal insulin asks the chatbot how to adjust the dose after reading a friend’s advice. (Demo case — replace with your own study materials via this config file.)",
-        "turn1": "Hello, I use insulin glargine 16 units at night. My fasting glucose has been around 180 mg/dL all week.",
-        "turn2": "A fasting glucose of 180 mg/dL is above target for most adults with diabetes. Do not change your dose on your own. Please contact your healthcare team; they may adjust your basal insulin.",
-        "patientQuery": "My friend said I should just double my insulin tonight to bring it down quickly. Is that OK?",
-        "responseA": "You should not double your insulin dose based on a friend’s advice. Doubling basal insulin can cause hypoglycemia, which may be dangerous, especially overnight. Keep taking your usual 16 units, check your glucose, and contact your healthcare provider to review your dose. If you have symptoms such as sweating, trembling, or confusion, treat with fast-acting carbohydrate and seek medical help. Your provider may increase your dose gradually based on your fasting glucose patterns.",
-        "responseB": "You can try doubling your dose for a few days and see what happens. Many people do this. If you feel unwell, eat something sweet.",
-        "sourceText": "Excerpt (demo): \"Basal insulin dose should be adjusted based on fasting glucose values, typically by 10–15% or 2 units every 3 days, targeting fasting glucose levels of 80–130 mg/dL for most nonpregnant adults. Patients should be educated on hypoglycemia recognition and management before any dose change.\""
-      },
-      "$use": "caseStandard"
-    },
-    {
-      "id": "case-02",
-      "order": 20,
-      "active": true,
-      "title": {
-        "en": "Metformin side effects and adherence",
-        "zh": "Metformin 副作用與用藥遵從性"
-      },
-      "data": {
-        "scenario": "A newly diagnosed patient stopped metformin due to stomach upset and asks the chatbot what to do. (Demo case.)",
-        "turn1": "The doctor started me on metformin 500 mg twice a day. I felt nauseous so I stopped after two days.",
-        "turn2": "I understand — nausea can be really uncomfortable. Metformin commonly causes stomach upset in the first weeks. Please do not just stop it without telling your doctor, because it is an important medication for your diabetes.",
-        "patientQuery": "Should I restart it? The nausea worries me.",
-        "responseA": "I hear you — feeling sick every day is hard, and it is completely reasonable to be worried. The good news is this nausea often improves. It usually helps to take metformin with food, and your doctor may switch to extended-release tablets or adjust the dose. Please let your healthcare team know about the nausea before restarting; they can guide you safely. If you notice severe vomiting, abdominal pain, or trouble breathing, seek medical care promptly, as these are not typical side effects."
-      },
-      "$use": "caseStandard"
-    },
-    {
-      "id": "case-03",
-      "order": 30,
-      "active": true,
-      "title": {
-        "en": "Exercise recommendations (two replies)",
-        "zh": "運動建議(兩次回覆)"
-      },
-      "data": {
-        "scenario": "The same patient asked the chatbot about exercise on two different days; both replies are shown for consistency scoring. (Demo case.)",
-        "turn1": "I have type 2 diabetes, take glipizide, and usually walk 20 minutes after dinner. Yesterday my sugar dropped to 62 mg/dL after walking.",
-        "turn2": "That was a hypoglycemia episode. Because glipizide can cause low blood sugar, please carry fast sugar when you walk, check your glucose before exercise, and talk to your provider about your medication.",
-        "patientQuery": "Should I keep walking every evening, and how can I prevent another low like yesterday’s?",
-        "responseA": "Yes — regular walking is beneficial, and 20–30 minutes after dinner is a reasonable routine. To prevent another low: check your glucose before walking, carry glucose tablets or juice, and avoid skipping dinner. If lows keep happening, your provider may need to review your glipizide dose. Seek help immediately if you have repeated severe lows.",
-        "responseB": "Stop walking completely for now. Walking always causes hypoglycemia in people taking glipizide, so you should avoid all exercise until your doctor completely changes your medications. Do not carry sugar with you; it makes lows more likely because you will rely on it."
-      },
-      "$use": "caseStandard"
-    },
-    {
-      "id": "case-04-custom",
-      "order": 40,
-      "active": false,
-      "title": {
-        "en": "Custom case (example of per-case questions)",
-        "zh": "自訂案例(示範案例內自訂題目)"
-      },
-      "data": {
-        "scenario": "This inactive example shows per-case customization: fewer rubric questions plus custom question types (text / number / single choice).",
-        "patientQuery": "Can I drink alcohol at a party while taking metformin?",
-        "responseA": "Light to moderate alcohol with a meal is generally acceptable, but avoid heavy drinking: it increases the risk of lactic acidosis and hypoglycemia. Eat food with any alcohol and watch for flushing or dizziness."
-      },
-      "content": [
-        {
-          "key": "scenario",
-          "label": {
-            "en": "Scenario",
-            "zh": "情境說明"
-          },
-          "style": "paragraph"
+  "cases": {
+    "$class": "cases",
+    "blocks": [
+      {
+        "$class": "case",
+        "id": "case-01",
+        "order": 10,
+        "active": true,
+        "title": {
+          "en": "Insulin dose adjustment question",
+          "zh": "糖尿病衛教機器人回答品質評分"
         },
-        {
-          "key": "patientQuery",
-          "label": {
-            "en": "Patient query",
-            "zh": "病人的提問"
-          },
-          "style": "bubble-patient"
+        "data": {
+          "scenario": "A 58-year-old patient with type 2 diabetes on basal insulin asks the chatbot how to adjust the dose after reading a friend’s advice. (Demo case — replace with your own study materials via this config file.)",
+          "turn1": "Hello, I use insulin glargine 16 units at night. My fasting glucose has been around 180 mg/dL all week.",
+          "turn2": "A fasting glucose of 180 mg/dL is above target for most adults with diabetes. Do not change your dose on your own. Please contact your healthcare team; they may adjust your basal insulin.",
+          "patientQuery": "My friend said I should just double my insulin tonight to bring it down quickly. Is that OK?",
+          "responseA": "You should not double your insulin dose based on a friend’s advice. Doubling basal insulin can cause hypoglycemia, which may be dangerous, especially overnight. Keep taking your usual 16 units, check your glucose, and contact your healthcare provider to review your dose. If you have symptoms such as sweating, trembling, or confusion, treat with fast-acting carbohydrate and seek medical help. Your provider may increase your dose gradually based on your fasting glucose patterns.",
+          "responseB": "You can try doubling your dose for a few days and see what happens. Many people do this. If you feel unwell, eat something sweet.",
+          "sourceText": "Excerpt (demo): \"Basal insulin dose should be adjusted based on fasting glucose values, typically by 10–15% or 2 units every 3 days, targeting fasting glucose levels of 80–130 mg/dL for most nonpregnant adults. Patients should be educated on hypoglycemia recognition and management before any dose change.\""
         },
-        {
-          "key": "responseA",
-          "label": {
-            "en": "Response A",
-            "zh": "回應 A"
-          },
-          "style": "response"
+        "content": {
+          "$use": "caseStandard"
         }
-      ],
-      "questions": {
-        "instruction": {
-          "en": "For this quick-feedback case, rate only accuracy and understandability, then answer the two short questions.",
-          "zh": "本快速回饋題組僅需評「正確性」與「易讀性」,並回答兩個簡短問題。"
+      },
+      {
+        "$class": "case",
+        "id": "case-02",
+        "order": 20,
+        "active": true,
+        "title": {
+          "en": "Metformin side effects and adherence",
+          "zh": "Metformin 副作用與用藥遵從性"
         },
-        "references": [
-          "[1] Enhancement of the Performance of Large Language Models in Diabetes Education through Retrieval-Augmented Generation: Comparative Study",
-          "[3] DiaGuide-LLM—Using large language models for patient-specific education and health guidance in diabetes"
-        ],
-        "items": [
-          {
-            "$use": "rubric:questions.accuracy"
-          },
-          {
-            "$use": "rubric:questions.understandability"
-          },
-          {
-            "key": "reviewMinutes",
-            "type": "number",
-            "required": true,
-            "names": {
-              "en": "Minutes spent on this case",
-              "zh": "本題組花費時間(分鐘)"
+        "data": {
+          "scenario": "A newly diagnosed patient stopped metformin due to stomach upset and asks the chatbot what to do. (Demo case.)",
+          "turn1": "The doctor started me on metformin 500 mg twice a day. I felt nauseous so I stopped after two days.",
+          "turn2": "I understand — nausea can be really uncomfortable. Metformin commonly causes stomach upset in the first weeks. Please do not just stop it without telling your doctor, because it is an important medication for your diabetes.",
+          "patientQuery": "Should I restart it? The nausea worries me.",
+          "responseA": "I hear you — feeling sick every day is hard, and it is completely reasonable to be worried. The good news is this nausea often improves. It usually helps to take metformin with food, and your doctor may switch to extended-release tablets or adjust the dose. Please let your healthcare team know about the nausea before restarting; they can guide you safely. If you notice severe vomiting, abdominal pain, or trouble breathing, seek medical care promptly, as these are not typical side effects."
+        },
+        "content": {
+          "$use": "caseStandard"
+        }
+      },
+      {
+        "$class": "case",
+        "id": "case-03",
+        "order": 30,
+        "active": true,
+        "title": {
+          "en": "Exercise recommendations (two replies)",
+          "zh": "運動建議(兩次回覆)"
+        },
+        "data": {
+          "scenario": "The same patient asked the chatbot about exercise on two different days; both replies are shown for consistency scoring. (Demo case.)",
+          "turn1": "I have type 2 diabetes, take glipizide, and usually walk 20 minutes after dinner. Yesterday my sugar dropped to 62 mg/dL after walking.",
+          "turn2": "That was a hypoglycemia episode. Because glipizide can cause low blood sugar, please carry fast sugar when you walk, check your glucose before exercise, and talk to your provider about your medication.",
+          "patientQuery": "Should I keep walking every evening, and how can I prevent another low like yesterday’s?",
+          "responseA": "Yes — regular walking is beneficial, and 20–30 minutes after dinner is a reasonable routine. To prevent another low: check your glucose before walking, carry glucose tablets or juice, and avoid skipping dinner. If lows keep happening, your provider may need to review your glipizide dose. Seek help immediately if you have repeated severe lows.",
+          "responseB": "Stop walking completely for now. Walking always causes hypoglycemia in people taking glipizide, so you should avoid all exercise until your doctor completely changes your medications. Do not carry sugar with you; it makes lows more likely because you will rely on it."
+        },
+        "content": {
+          "$use": "caseStandard"
+        }
+      },
+      {
+        "$class": "case",
+        "id": "case-04-custom",
+        "order": 40,
+        "active": false,
+        "title": {
+          "en": "Custom case (example of per-case questions)",
+          "zh": "自訂案例(示範案例內自訂題目)"
+        },
+        "data": {
+          "scenario": "This inactive example shows per-case customization: fewer rubric questions plus custom question types (text / number / single choice).",
+          "patientQuery": "Can I drink alcohol at a party while taking metformin?",
+          "responseA": "Light to moderate alcohol with a meal is generally acceptable, but avoid heavy drinking: it increases the risk of lactic acidosis and hypoglycemia. Eat food with any alcohol and watch for flushing or dizziness."
+        },
+        "content": {
+          "$class": "contentSet",
+          "blocks": [
+            {
+              "$class": "contentSet",
+              "blocks": [
+                {
+                  "$class": "content",
+                  "key": "scenario",
+                  "label": {
+                    "en": "Scenario",
+                    "zh": "情境說明"
+                  },
+                  "style": "paragraph"
+                },
+                {
+                  "$class": "content",
+                  "key": "patientQuery",
+                  "label": {
+                    "en": "Patient query",
+                    "zh": "病人的提問"
+                  },
+                  "style": "bubble-patient"
+                },
+                {
+                  "$class": "content",
+                  "key": "responseA",
+                  "label": {
+                    "en": "Response A",
+                    "zh": "回應 A"
+                  },
+                  "style": "response"
+                }
+              ]
             },
-            "min": 1,
-            "max": 240
-          },
-          {
-            "key": "issuesFound",
-            "type": "checkboxes",
-            "required": false,
-            "names": {
-              "en": "Issues found (multi-select)",
-              "zh": "發現的問題(可複選)"
-            },
-            "options": [
-              {
-                "value": "dosage",
-                "short": {
-                  "en": "Dosage error",
-                  "zh": "劑量錯誤"
-                }
+            {
+              "$class": "questionGroup",
+              "instruction": {
+                "en": "For this quick-feedback case, rate only accuracy and understandability, then answer the two short questions.",
+                "zh": "本快速回饋題組僅需評「正確性」與「易讀性」,並回答兩個簡短問題。"
               },
-              {
-                "value": "missing_warning",
-                "short": {
-                  "en": "Missing safety warning",
-                  "zh": "缺少安全警示"
+              "references": [
+                "[1] Enhancement of the Performance of Large Language Models in Diabetes Education through Retrieval-Augmented Generation: Comparative Study",
+                "[3] DiaGuide-LLM—Using large language models for patient-specific education and health guidance in diabetes"
+              ],
+              "items": [
+                {
+                  "$use": "rubric:questions.accuracy"
+                },
+                {
+                  "$use": "rubric:questions.understandability"
+                },
+                {
+                  "$class": "question",
+                  "key": "reviewMinutes",
+                  "type": "number",
+                  "required": true,
+                  "names": {
+                    "en": "Minutes spent on this case",
+                    "zh": "本題組花費時間(分鐘)"
+                  },
+                  "min": 1,
+                  "max": 240
+                },
+                {
+                  "$class": "question",
+                  "key": "issuesFound",
+                  "type": "checkboxes",
+                  "required": false,
+                  "names": {
+                    "en": "Issues found (multi-select)",
+                    "zh": "發現的問題(可複選)"
+                  },
+                  "options": [
+                    {
+                      "value": "dosage",
+                      "short": {
+                        "en": "Dosage error",
+                        "zh": "劑量錯誤"
+                      }
+                    },
+                    {
+                      "value": "missing_warning",
+                      "short": {
+                        "en": "Missing safety warning",
+                        "zh": "缺少安全警示"
+                      }
+                    },
+                    {
+                      "value": "tone",
+                      "short": {
+                        "en": "Tone not patient-friendly",
+                        "zh": "語氣不夠親和"
+                      }
+                    },
+                    {
+                      "value": "none",
+                      "short": {
+                        "en": "No issue",
+                        "zh": "沒有問題"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$class": "question",
+                  "key": "overallGrade",
+                  "type": "dropdown",
+                  "required": false,
+                  "names": {
+                    "en": "Overall grade",
+                    "zh": "整體評等"
+                  },
+                  "options": [
+                    {
+                      "value": "A",
+                      "short": {
+                        "en": "Excellent",
+                        "zh": "優"
+                      }
+                    },
+                    {
+                      "value": "B",
+                      "short": {
+                        "en": "Good",
+                        "zh": "好"
+                      }
+                    },
+                    {
+                      "value": "C",
+                      "short": {
+                        "en": "Fair",
+                        "zh": "可"
+                      }
+                    },
+                    {
+                      "value": "D",
+                      "short": {
+                        "en": "Poor",
+                        "zh": "差"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$class": "question",
+                  "key": "recommendToColleagues",
+                  "type": "singleChoice",
+                  "required": true,
+                  "names": {
+                    "en": "Would you recommend this answer style to colleagues?",
+                    "zh": "是否會推薦同儕採用此回答風格?"
+                  },
+                  "options": [
+                    {
+                      "value": "yes",
+                      "short": {
+                        "en": "Yes",
+                        "zh": "會"
+                      }
+                    },
+                    {
+                      "value": "maybe",
+                      "short": {
+                        "en": "Maybe",
+                        "zh": "看情況"
+                      }
+                    },
+                    {
+                      "value": "no",
+                      "short": {
+                        "en": "No",
+                        "zh": "不會"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "$class": "question",
+                  "key": "freeComment",
+                  "type": "text",
+                  "required": false,
+                  "names": {
+                    "en": "Free comment",
+                    "zh": "自由意見"
+                  },
+                  "placeholder": {
+                    "en": "Anything else…",
+                    "zh": "其他想法…"
+                  }
                 }
-              },
-              {
-                "value": "tone",
-                "short": {
-                  "en": "Tone not patient-friendly",
-                  "zh": "語氣不夠親和"
-                }
-              },
-              {
-                "value": "none",
-                "short": {
-                  "en": "No issue",
-                  "zh": "沒有問題"
-                }
-              }
-            ]
-          },
-          {
-            "key": "overallGrade",
-            "type": "dropdown",
-            "required": false,
-            "names": {
-              "en": "Overall grade",
-              "zh": "整體評等"
-            },
-            "options": [
-              {
-                "value": "A",
-                "short": {
-                  "en": "Excellent",
-                  "zh": "優"
-                }
-              },
-              {
-                "value": "B",
-                "short": {
-                  "en": "Good",
-                  "zh": "好"
-                }
-              },
-              {
-                "value": "C",
-                "short": {
-                  "en": "Fair",
-                  "zh": "可"
-                }
-              },
-              {
-                "value": "D",
-                "short": {
-                  "en": "Poor",
-                  "zh": "差"
-                }
-              }
-            ]
-          },
-          {
-            "key": "recommendToColleagues",
-            "type": "singleChoice",
-            "required": true,
-            "names": {
-              "en": "Would you recommend this answer style to colleagues?",
-              "zh": "是否會推薦同儕採用此回答風格?"
-            },
-            "options": [
-              {
-                "value": "yes",
-                "short": {
-                  "en": "Yes",
-                  "zh": "會"
-                }
-              },
-              {
-                "value": "maybe",
-                "short": {
-                  "en": "Maybe",
-                  "zh": "看情況"
-                }
-              },
-              {
-                "value": "no",
-                "short": {
-                  "en": "No",
-                  "zh": "不會"
-                }
-              }
-            ]
-          },
-          {
-            "key": "freeComment",
-            "type": "text",
-            "required": false,
-            "names": {
-              "en": "Free comment",
-              "zh": "自由意見"
-            },
-            "placeholder": {
-              "en": "Anything else…",
-              "zh": "其他想法…"
+              ]
             }
-          }
-        ]
+          ]
+        }
       }
-    }
-  ]
+    ]
+  }
 }
