@@ -1,5 +1,5 @@
 {
-  "$schemaNote": "Survey configuration. Any node may use \"$use\": \"<templateName>\" or \"$ref\": \"#/json/pointer\" to inherit a definition (deep-merged; inline keys override the template). Templates live under \"templates\"; rubric anchors are auto-registered as templates named \"rubric:<dimensionKey>\".",
+  "$schemaNote": "Survey configuration. Any node may use \"$use\": \"<templateName>\" or \"$ref\": \"#/json/pointer\" to inherit a definition (deep-merged; inline keys override the template). Templates live under \"templates\"; rubric.json is exposed as \"rubric:<dotted.path>\" (e.g. \"rubric:questions.accuracy\" -> rubric.json -> questions -> accuracy).",
   "site": {
     "title": {
       "en": "LLM Response Quality Evaluation",
@@ -103,22 +103,22 @@
       ],
       "items": [
         {
-          "$use": "rubric:accuracy"
+          "$use": "rubric:questions.accuracy"
         },
         {
-          "$use": "rubric:comprehensiveness"
+          "$use": "rubric:questions.comprehensiveness"
         },
         {
-          "$use": "rubric:understandability"
+          "$use": "rubric:questions.understandability"
         },
         {
-          "$use": "rubric:safety"
+          "$use": "rubric:questions.safety"
         },
         {
-          "$use": "rubric:utility"
+          "$use": "rubric:questions.utility"
         },
         {
-          "$use": "rubric:globalQuality"
+          "$use": "rubric:questions.globalQuality"
         }
       ]
     },
@@ -135,16 +135,16 @@
       ],
       "items": [
         {
-          "$use": "rubric:empathy"
+          "$use": "rubric:questions.empathy"
         },
         {
-          "$use": "rubric:contextAwareness"
+          "$use": "rubric:questions.contextAwareness"
         },
         {
-          "$use": "rubric:sourceAttribution"
+          "$use": "rubric:questions.sourceAttribution"
         },
         {
-          "$use": "rubric:consistency"
+          "$use": "rubric:questions.consistency"
         }
       ]
     }
@@ -254,10 +254,10 @@
         ],
         "items": [
           {
-            "$use": "rubric:accuracy"
+            "$use": "rubric:questions.accuracy"
           },
           {
-            "$use": "rubric:understandability"
+            "$use": "rubric:questions.understandability"
           },
           {
             "key": "reviewMinutes",

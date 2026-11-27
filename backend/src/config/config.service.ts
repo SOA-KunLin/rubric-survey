@@ -180,43 +180,48 @@ export class ConfigService implements OnModuleInit {
   }
 
   // ---------- template resolution ----------
+  /**
+   * Resolve a "rubric:<dotted.path>" reference against rubric.json.
+   *   rubric:questions.accuracy  -> rubric.json -> questions -> accuracy
+   *   rubric:accuracy            -> legacy shorthand for rubric:questions.accuracy
+   * Returns a deep copy (the same template may be merged into many cases).
+   */
   private rubricTemplate(name: string): any {
-    const key = name.slice('rubric:'.length);
-    const d = this.rubric.rubric.dimensions.find((x) => x.key === key);
-    if (!d) return undefined;
-    return {
-      key: d.key,
-      type: 'anchor',
-      names: d.names,
-      ref: d.ref,
-      refZh: d.refZh,
-      required: true,
-      appliesIf: d.requires === 'responseB' ? { hasResponseB: true } : undefined,
-      options: d.levels.map((l) => ({ value: l.score, short: l.short, anchor: l.anchor })),
-    };
+    let path = name.slice('rubric:'.length);
+    if (!path.startsWith('questions.')) path = `questions.${path}`;
+    let cur: any = { questions: this.rubric.questions };
+    for (const seg of path.split('.')) {
+      if (cur === undefined || cur === null) return undefined;
+      cur = cur[seg];
+    }
+    if (!cur) return undefined;
+    const out = JSON.parse(JSON.stringify(cur));
+    if (out.key === undefined) out.key = path.split('.').pop();
+    if (out.required === undefined) out.required = true;
+    return out;
   }
 
-  private resolveNode(node: any, chain: string[]): any {
-    if (Array.isArray(node)) return node.map((n) => this.resolveNode(n, chain));
+  private resolveNode(node: any, chain: string[], rootDoc: any): any {
+    if (Array.isArray(node)) return node.map((n) => this.resolveNode(n, chain, rootDoc));
     if (!isPlainObject(node)) return node;
     if (node.$use || node.$ref) {
       let name = '';
       let base: any;
       if (node.$ref) {
-        base = getByPointer(this.raw, node.$ref);
+        base = getByPointer(rootDoc, node.$ref);
         name = node.$ref;
       } else {
         name = node.$use;
-        base = name.startsWith('rubric:') ? this.rubricTemplate(name) : this.raw.templates?.[name];
+        base = name.startsWith('rubric:') ? this.rubricTemplate(name) : rootDoc.templates?.[name];
       }
       if (base === undefined) throw new Error(`Unknown template/ref: "${name}"`);
       if (chain.includes(name)) throw new Error(`Circular template reference: ${chain.concat(name).join(' -> ')}`);
-      const baseResolved = this.resolveNode(base, chain.concat(name));
-      const inlineResolved = this.resolveNode(stripKeys(node), chain);
+      const baseResolved = this.resolveNode(base, chain.concat(name), rootDoc);
+      const inlineResolved = this.resolveNode(stripKeys(node), chain, rootDoc);
       return deepMerge(baseResolved, inlineResolved);
     }
     const out: any = {};
-    for (const k of Object.keys(node)) out[k] = this.resolveNode(node[k], chain);
+    for (const k of Object.keys(node)) out[k] = this.resolveNode(node[k], chain, rootDoc);
     return out;
   }
 
@@ -256,7 +261,7 @@ export class ConfigService implements OnModuleInit {
   }
 
   private resolveConfig(raw: any): ResolvedConfig {
-    const resolvedRoot = this.resolveNode(raw, []);
+    const resolvedRoot = this.resolveNode(raw, [], raw);
     const site = resolvedRoot.site || {};
     // auth defaults (config overrides env; env overrides built-in default)
     site.auth = {
@@ -274,7 +279,7 @@ export class ConfigService implements OnModuleInit {
     const errors: string[] = [];
     let resolvedRoot: any;
     try {
-      resolvedRoot = this.resolveNode(raw, []);
+      resolvedRoot = this.resolveNode(raw, [], raw);
     } catch (e: any) {
       return [`template resolution failed: ${e.message}`];
     }

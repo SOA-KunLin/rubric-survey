@@ -65,7 +65,7 @@ npm run start        # 後端 http://localhost:3001/api,前端 http://localhost:
 | `RUBRIC_PATH` | 自動探測 `../rubric.json` | 量表檔位置 |
 | `NEXT_PUBLIC_API_URL` | `http://localhost:3001/api` | 前端 API 位址 |
 
-## 反向代理(掛在子路徑,如 `/rubric-survey/`)
+## 反向代理(掛在子路徑,如 `/rubric-survey`)
 
 網站可透過純 shell 環境變數在**建置時**指定前綴,程式碼不需改動:
 
@@ -77,12 +77,13 @@ just start
 - `NEXT_PUBLIC_BASE_PATH` 會讓 Next 把所有頁面路由與 `/_next` 靜態資源自動加上前綴;同源 API 代理也會跟著變成 `/rubric-survey/backend-api`
 - 必須在 **build 時**給(`NEXT_PUBLIC_*` 會烘焙進產物),只在 `next start` 給無效
 - 不設(或設空)即為根路徑部署,本機開發不受影響
+- 前綴式建置後,根路徑 `/` 會回 404(Normal)—網站入口是 `/rubric-survey`
 
-nginx 範例(**保留**前綴原樣轉發,`proxy_pass` 結尾不要有 `/`):
+nginx 範例(**實測可用的配置**):`location` 與 `proxy_pass` 都**不帶結尾斜線與路徑**,讓完整 URI 原樣轉發:
 
 ```nginx
-location /rubric-survey/ {
-    proxy_pass http://host.docker.internal:3000;   # 結尾不要加 /
+location /rubric-survey {
+    proxy_pass http://host.docker.internal:3000;   # 不帶路徑、不帶 /
     proxy_set_header Host $host;
     proxy_set_header X-Real-IP $remote_addr;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -90,12 +91,22 @@ location /rubric-survey/ {
 }
 ```
 
+**常見錯誤配置**(會連得到頁面但 CSS/JS 全 404,勿用):
+
+```nginx
+location /rubric-survey/ {                            # 結尾有 /
+    proxy_pass http://host.docker.internal:3000/rubric-survey;   # 帶了路徑
+}
+```
+
+原因:`proxy_pass` 帶路徑時 nginx 會做前綴字串替換,`/rubric-survey/_next/...` 會被改寫成 `/rubric-survey_next/...`(斜線消失)→ 靜態資源 404;且 Next 預設頁面網址無結尾斜線,308 轉址後的 `/rubric-survey` 會落到此 location 之外造成迴圈。
+
 後端 `:3001` 無需對外暴露:瀏覽器的所有請求都經前端同源代理 `/backend-api` 轉發,建議以防火牆限制或讓後端只綁 `127.0.0.1`。若能使用獨立子網域(代理到根路徑),則完全不需設定 `NEXT_PUBLIC_BASE_PATH`。
 
 ## 資料與量表
 
 - `survey.config.json` — **問卷主設定檔**(主題/案例/題目,支援巢狀模板);後端啟動時載入並驗證,後台可線上編輯熱套用
-- `rubric.json` — 錨點庫(10 個面向的雙語錨點與文獻),供設定檔以 `rubric:<key>` 引用
+- `rubric.json` — **題目模板庫**(每筆格式與 `survey.config.json` 的題目定義完全一致:key/type/names/ref/options,只是把重複使用的錨點題抽取出來);設定檔以 `{"$use": "rubric:questions.<key>"}` 引用(`rubric:` 後為 rubric.json 內的點分路徑;舊簡寫 `rubric:<key>` 仍相容),改錨點所有引用的案例同步生效
 - `backend/data/survey.sqlite` — 資料庫(評分者/評分);案例內容由設定檔驅動,不再存於資料庫
 - `npm run db:reset` / `just reset-db` — 清空評分資料(示範案例來自設定檔,重啟即還原)
 
